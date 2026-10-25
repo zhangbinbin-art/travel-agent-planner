@@ -41,12 +41,10 @@ const validatePassword = (rule, value, callback) => {
     callback(new Error('密码长度需为6~12位'))
     return
   }
-  const hasUpper = /[A-Z]/.test(value)
-  const hasLower = /[a-z]/.test(value)
+  const hasLetter = /[A-Za-z]/.test(value)
   const hasDigit = /[0-9]/.test(value)
-  const hasSpecial = /[^A-Za-z0-9]/.test(value)
-  if (!(hasUpper && hasLower && hasDigit && hasSpecial)) {
-    callback(new Error('密码必须包含大写字母、小写字母、数字、特殊符号各至少一种'))
+  if (!(hasLetter && hasDigit)) {
+    callback(new Error('密码必须包含字母和数字'))
     return
   }
   callback()
@@ -97,6 +95,6 @@ const handleRegister = () => {
   background: #f7f8fa;
 }
 .register-card {
-  width: 460px;
+  width: 420px;
 }
 </style>
