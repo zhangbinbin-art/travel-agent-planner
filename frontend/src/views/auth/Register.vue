@@ -94,8 +94,16 @@ const handleRegister = () => {
       ElMessage.success('注册成功')
       router.push('/login')
     } catch (e) {
-      const msg = e?.response?.data?.detail || '注册失败'
-      ElMessage.error(typeof msg === 'string' ? msg : '注册失败')
+      const data = e?.response?.data
+      let msg = '注册失败'
+      if (typeof data?.detail === 'string') {
+        msg = data.detail
+      } else if (typeof data?.message === 'string') {
+        msg = data.message
+      } else if (Array.isArray(data?.detail) && data.detail[0]?.msg) {
+        msg = data.detail[0].msg
+      }
+      ElMessage.error('注册失败：' + msg)
     } finally {
       loading.value = false
     }
