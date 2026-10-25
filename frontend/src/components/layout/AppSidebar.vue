@@ -4,18 +4,17 @@
       <el-menu-item index="/">首页</el-menu-item>
       <el-menu-item index="/spot-list">景点列表</el-menu-item>
       <el-menu-item index="/post-list">游记列表</el-menu-item>
-      <el-menu-item v-if="user.role !== 'guest'" index="/plan">智能路线规划</el-menu-item>
-      <el-menu-item v-if="user.role !== 'guest'" index="/user">个人中心</el-menu-item>
-      <el-menu-item v-if="user.role === 'admin'" index="/admin">管理员后台</el-menu-item>
-      <el-menu-item v-if="user.role === 'guest'" index="/login">登录</el-menu-item>
-      <el-menu-item v-if="user.role === 'guest'" index="/register">注册</el-menu-item>
+      <el-menu-item v-if="auth.token" index="/plan">智能路线规划</el-menu-item>
+      <el-menu-item v-if="auth.token" index="/user">个人中心</el-menu-item>
+      <el-menu-item v-if="auth.role === 'admin'" index="/admin">管理员后台</el-menu-item>
+      <el-menu-item v-if="!auth.token" index="/login">登录</el-menu-item>
+      <el-menu-item v-if="!auth.token" index="/register">注册</el-menu-item>
     </el-menu>
   </aside>
 </template>
 
 <script setup>
-import { mockUser } from '@/api/mock'
-const user = mockUser
+import { auth } from '@/utils/auth'
 </script>
 
 <style scoped>

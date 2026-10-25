@@ -4,23 +4,37 @@
       <span class="logo">个性化旅行规划平台</span>
     </div>
     <div class="header-right">
-      <el-button v-if="user.role === 'guest'" type="primary" text @click="$router.push('/login')">登录</el-button>
-      <el-button v-if="user.role === 'guest'" text @click="$router.push('/register')">注册</el-button>
-      <span v-else>欢迎，{{ user.username || '用户' }}（{{ roleText }}）</span>
+      <template v-if="!auth.token">
+        <el-button type="primary" text @click="$router.push('/login')">登录</el-button>
+        <el-button text @click="$router.push('/register')">注册</el-button>
+      </template>
+      <template v-else>
+        <span>欢迎，{{ auth.username || '用户' }}（{{ roleText }}）</span>
+        <el-button text type="danger" @click="handleLogout">退出登录</el-button>
+      </template>
     </div>
   </header>
 </template>
 
 <script setup>
 import { computed } from 'vue'
-import { mockUser } from '@/api/mock'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { auth, clearAuth } from '@/utils/auth'
 
-const user = mockUser
+const router = useRouter()
+
 const roleText = computed(() => {
-  if (user.role === 'admin') return '管理员'
-  if (user.role === 'user') return '普通用户'
+  if (auth.role === 'admin') return '管理员'
+  if (auth.role === 'user') return '普通用户'
   return '游客'
 })
+
+const handleLogout = () => {
+  clearAuth()
+  ElMessage.success('已退出登录')
+  router.push('/')
+}
 </script>
 
 <style scoped>

@@ -49,6 +49,7 @@ class Favorite(Base):
     user_id = Column(Integer, ForeignKey("users.id"))
     spot_id = Column(Integer, ForeignKey("spots.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    spot = relationship("Spot")
 
 class Trip(Base):
     __tablename__ = "trips"

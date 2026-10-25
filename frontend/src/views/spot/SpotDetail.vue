@@ -4,7 +4,7 @@
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
           <span>景点详情（ID：{{ $route.params.id }}）</span>
-          <el-button :type="isFavorited ? 'warning' : 'primary'" @click="handleFavorite">
+          <el-button :type="isFavorited ? 'warning' : 'primary'" :loading="favoriteLoading" @click="handleFavorite">
             {{ isFavorited ? '已收藏' : '收藏' }}
           </el-button>
         </div>
@@ -33,14 +33,16 @@ import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getSpotDetail } from '@/api/spot'
-import { addFavorite, removeFavorite } from '@/api/favorite'
+import { addFavorite, removeFavorite, getMyFavorites } from '@/api/favorite'
 import { mockComments } from '@/api/mock'
+import { auth } from '@/utils/auth'
 
 const route = useRoute()
 const router = useRouter()
 const spot = ref({})
 const comments = ref(mockComments)
 const isFavorited = ref(false)
+const favoriteLoading = ref(false)
 
 const tagText = computed(() => {
   if (Array.isArray(spot.value.tags)) return spot.value.tags.join('、')
@@ -48,13 +50,24 @@ const tagText = computed(() => {
   return ''
 })
 
+const loadFavoriteState = async () => {
+  if (!auth.token) return
+  try {
+    const res = await getMyFavorites({ page: 1, page_size: 100 })
+    const items = res.data?.items || []
+    isFavorited.value = items.some((it) => String(it.spot_id) === String(route.params.id))
+  } catch (e) {
+    // 静默失败，不影响详情展示
+  }
+}
+
 const handleFavorite = async () => {
-  const token = localStorage.getItem('token')
-  if (!token) {
+  if (!auth.token) {
     ElMessage.warning('请先登录')
     router.push('/login')
     return
   }
+  favoriteLoading.value = true
   try {
     if (isFavorited.value) {
       await removeFavorite(route.params.id)
@@ -66,7 +79,14 @@ const handleFavorite = async () => {
       ElMessage.success('收藏成功')
     }
   } catch (e) {
+    if (e?.response?.status === 401) {
+      ElMessage.warning('请先登录')
+      router.push('/login')
+      return
+    }
     ElMessage.error(e?.response?.data?.detail || '操作失败')
+  } finally {
+    favoriteLoading.value = false
   }
 }
 
@@ -75,8 +95,13 @@ onMounted(async () => {
     const res = await getSpotDetail(route.params.id)
     spot.value = res.data || {}
   } catch (e) {
-    ElMessage.error('获取景点详情失败')
+    if (e?.response?.status === 404) {
+      ElMessage.error('景点不存在')
+    } else {
+      ElMessage.error('获取景点详情失败')
+    }
   }
+  loadFavoriteState()
 })
 </script>
 

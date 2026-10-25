@@ -23,6 +23,7 @@ import { reactive } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
+import { setAuth } from '@/utils/auth'
 
 const router = useRouter()
 const form = reactive({
@@ -33,11 +34,15 @@ const form = reactive({
 const handleLogin = async () => {
   try {
     const res = await api.post('/api/v1/user/login', form)
-    localStorage.setItem('token', res.data.access_token)
+    setAuth(res.data.access_token, form.username)
     ElMessage.success('登录成功')
     router.push('/')
   } catch (e) {
-    ElMessage.error('账号或密码错误')
+    if (e?.response?.status === 401) {
+      ElMessage.error('账号或密码错误')
+    } else {
+      ElMessage.error(e?.response?.data?.detail || '登录失败，请稍后重试')
+    }
   }
 }
 </script>
