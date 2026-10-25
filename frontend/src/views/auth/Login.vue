@@ -10,7 +10,7 @@
           <el-input v-model="form.password" type="password" placeholder="请输入密码" show-password />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary">登录</el-button>
+          <el-button type="primary" @click="handleLogin">登录</el-button>
           <el-button text @click="$router.push('/register')">去注册</el-button>
         </el-form-item>
       </el-form>
@@ -20,11 +20,26 @@
 
 <script setup>
 import { reactive } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import api from '@/api'
 
+const router = useRouter()
 const form = reactive({
   username: '',
   password: ''
 })
+
+const handleLogin = async () => {
+  try {
+    const res = await api.post('/api/v1/user/login', form)
+    localStorage.setItem('token', res.data.access_token)
+    ElMessage.success('登录成功')
+    router.push('/')
+  } catch (e) {
+    ElMessage.error('账号或密码错误')
+  }
+}
 </script>
 
 <style scoped>
