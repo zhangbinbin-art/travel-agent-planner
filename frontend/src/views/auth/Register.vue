@@ -94,16 +94,39 @@ const handleRegister = () => {
       ElMessage.success('注册成功')
       router.push('/login')
     } catch (e) {
+      console.log('register error:', e)
+      console.log('register error.response:', e?.response)
+      console.log('register error.response.data:', e?.response?.data)
       const data = e?.response?.data
-      let msg = '注册失败'
+      let msg = ''
       if (typeof data?.detail === 'string') {
         msg = data.detail
+      } else if (Array.isArray(data?.detail) && data.detail.length > 0) {
+        const first = data.detail[0]
+        if (typeof first?.msg === 'string') {
+          msg = first.msg
+        } else if (typeof first === 'string') {
+          msg = first
+        }
       } else if (typeof data?.message === 'string') {
         msg = data.message
-      } else if (Array.isArray(data?.detail) && data.detail[0]?.msg) {
-        msg = data.detail[0].msg
+      } else if (typeof e?.message === 'string') {
+        msg = e.message
       }
-      ElMessage.error('注册失败：' + msg)
+      if (!msg) {
+        if (!e?.response) {
+          msg = '无法连接后端服务，请检查后端是否启动、接口地址是否正确'
+        } else {
+          msg = '注册失败'
+        }
+      }
+      if (msg === '注册失败' && e?.response) {
+        ElMessage.error('注册失败：' + msg)
+      } else if (msg.includes('无法连接')) {
+        ElMessage.error(msg)
+      } else {
+        ElMessage.error('注册失败：' + msg)
+      }
     } finally {
       loading.value = false
     }
