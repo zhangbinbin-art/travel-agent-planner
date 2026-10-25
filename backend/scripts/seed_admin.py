@@ -1,3 +1,8 @@
+﻿import os
+import sys
+
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from core.database import SessionLocal
 from models import User
 from core.hash import get_password_hash

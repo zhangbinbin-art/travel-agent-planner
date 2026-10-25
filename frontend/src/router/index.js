@@ -1,4 +1,5 @@
 import { createRouter, createWebHistory } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import AppLayout from '@/components/layout/AppLayout.vue'
 
 const routes = [
@@ -10,6 +11,9 @@ const routes = [
       { path: 'spot-list', name: 'SpotList', component: () => import('@/views/spot/SpotList.vue') },
       { path: 'spot-detail/:id', name: 'SpotDetail', component: () => import('@/views/spot/SpotDetail.vue') },
       { path: 'post-list', name: 'PostList', component: () => import('@/views/post/PostList.vue') },
+      { path: 'post-detail/:id', name: 'PostDetail', component: () => import('@/views/post/PostDetail.vue') },
+      { path: 'post-edit', name: 'PostCreate', component: () => import('@/views/post/PostEdit.vue') },
+      { path: 'post-edit/:id', name: 'PostEdit', component: () => import('@/views/post/PostEdit.vue') },
       { path: 'user', name: 'UserCenter', component: () => import('@/views/user/UserCenter.vue') },
       { path: 'plan', name: 'Plan', component: () => import('@/views/plan/Plan.vue') },
       { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') }
@@ -22,6 +26,15 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to) => {
+  const needAuth = to.path === '/post-edit' || to.path.startsWith('/post-edit/')
+  if (needAuth && !localStorage.getItem('token')) {
+    ElMessage.warning('请先登录')
+    return { path: '/login', query: { redirect: to.fullPath } }
+  }
+  return true
 })
 
 export default router
