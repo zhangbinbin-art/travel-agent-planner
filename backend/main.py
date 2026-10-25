@@ -5,10 +5,11 @@ from core.config import settings
 
 app = FastAPI(title="个性化旅行规划平台API", version="0.1.0", description="基于Python的个性化旅行规划平台后端")
 
+# 修改跨域，调试阶段放开全部源，避免localhost/127.0.0.1端口混用导致跨域拦截
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[settings.FRONTEND_ORIGIN, "http://localhost:5173"],
-    allow_credentials=True,
+    allow_origins=["*"],
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
