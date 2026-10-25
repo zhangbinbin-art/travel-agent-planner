@@ -13,7 +13,7 @@
           <el-input v-model="form.confirm" type="password" placeholder="请确认密码" show-password />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary" @click="handleRegister">注册</el-button>
+          <el-button type="primary" @click="handleRegister" :loading="loading">注册</el-button>
           <el-button text @click="$router.push('/login')">已有账号，去登录</el-button>
         </el-form-item>
       </el-form>
@@ -23,9 +23,13 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
+import api from '@/api'
 
+const router = useRouter()
 const formRef = ref()
+const loading = ref(false)
 const form = reactive({
   username: '',
   password: '',
@@ -76,12 +80,25 @@ const rules = {
 }
 
 const handleRegister = () => {
-  formRef.value.validate((valid) => {
+  formRef.value.validate(async (valid) => {
     if (!valid) {
       ElMessage.error('请按要求填写注册信息')
       return
     }
-    ElMessage.success('注册信息校验通过（暂未对接后端）')
+    loading.value = true
+    try {
+      await api.post('/api/v1/user/register', {
+        username: form.username,
+        password: form.password
+      })
+      ElMessage.success('注册成功')
+      router.push('/login')
+    } catch (e) {
+      const msg = e?.response?.data?.detail || '注册失败'
+      ElMessage.error(typeof msg === 'string' ? msg : '注册失败')
+    } finally {
+      loading.value = false
+    }
   })
 }
 </script>
