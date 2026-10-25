@@ -1,0 +1,42 @@
+# frontend
+frontend/node_modules/
+frontend/dist/
+frontend/.vite/
+frontend/.DS_Store
+
+# backend预留
+backend/__pycache__/
+backend/.venv/
+backend/venv/
+backend/*.pyc
+backend/.env
+backend/instance/
+backend/*.db
+backend/*.sqlite
+backend/*.sqlite3
+backend/alembic/versions/*.pyc
+
+# env & secrets
+.env
+*.env.local
+*.env.*.local
+
+# logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+Thumbs.db
+.DS_Store
+
+# others
+*.bak
+*.tmp
+*.swp
+*~
