@@ -2,53 +2,73 @@
   <div class="spot-list">
     <el-card>
       <template #header>景点列表</template>
-      <el-form :inline="true" :model="filters">
-        <el-form-item label="城市">
-          <el-select v-model="filters.city" placeholder="全部" clearable>
-            <el-option label="杭州" value="杭州" />
-            <el-option label="北京" value="北京" />
-            <el-option label="上海" value="上海" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="标签">
-          <el-select v-model="filters.tag" placeholder="全部" clearable>
-            <el-option label="自然风光" value="自然风光" />
-            <el-option label="历史文化" value="历史文化" />
-            <el-option label="城市观光" value="城市观光" />
-          </el-select>
-        </el-form-item>
-        <el-form-item label="评分">
-          <el-select v-model="filters.score" placeholder="全部" clearable>
-            <el-option label="4.9分以上" value="4.9" />
-            <el-option label="4.8分以上" value="4.8" />
-          </el-select>
+      <el-form :inline="true" :model="filters" @submit.prevent>
+        <el-form-item label="关键词">
+          <el-input v-model="filters.keyword" placeholder="搜索景点名称或城市" clearable />
         </el-form-item>
         <el-form-item>
-          <el-button type="primary">筛选</el-button>
+          <el-button type="primary" @click="handleSearch">搜索</el-button>
+          <el-button @click="reset">重置</el-button>
         </el-form-item>
       </el-form>
       <el-row :gutter="16">
         <el-col v-for="spot in spots" :key="spot.id" :span="6">
-          <el-card shadow="hover" @click="$router.push(`/spot-detail/${spot.id}`)">
-            <div class="spot-title">{{ spot.name }}</div>
-            <div class="spot-desc">{{ spot.desc }}</div>
-            <div class="spot-tags">
-              <el-tag v-for="t in spot.tags" :key="t" size="small">{{ t }}</el-tag>
-            </div>
-            <div class="spot-score">{{ spot.score }} 分</div>
-          </el-card>
+          <SpotCard :spot="spot" />
         </el-col>
       </el-row>
-      <el-pagination class="pager" background layout="prev, pager, next" :total="spots.length" />
+      <el-pagination
+        class="pager"
+        background
+        layout="prev, pager, next"
+        :total="total"
+        :page-size="pageSize"
+        :current-page="page"
+        @current-change="handlePageChange"
+      />
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { reactive } from 'vue'
-import { mockSpots } from '@/api/mock'
-const filters = reactive({ city: '', tag: '', score: '' })
-const spots = mockSpots
+import { reactive, ref, onMounted } from 'vue'
+import { getSpotList } from '@/api/spot'
+import SpotCard from '@/components/SpotCard.vue'
+
+const filters = reactive({ keyword: '' })
+const spots = ref([])
+const total = ref(0)
+const page = ref(1)
+const pageSize = ref(12)
+
+const fetchList = async () => {
+  const res = await getSpotList({
+    keyword: filters.keyword || undefined,
+    page: page.value,
+    page_size: pageSize.value
+  })
+  spots.value = res.data.items || []
+  total.value = res.data.total || 0
+}
+
+const handleSearch = () => {
+  page.value = 1
+  fetchList()
+}
+
+const reset = () => {
+  filters.keyword = ''
+  page.value = 1
+  fetchList()
+}
+
+const handlePageChange = (p) => {
+  page.value = p
+  fetchList()
+}
+
+onMounted(() => {
+  fetchList()
+})
 </script>
 
 <style scoped>

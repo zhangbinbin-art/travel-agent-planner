@@ -1,7 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.v1 import health, user
-from core.config import settings
+from api.v1 import health, user, spot, favorite
 
 app = FastAPI(title="个性化旅行规划平台API", version="0.1.0", description="基于Python的个性化旅行规划平台后端")
 
@@ -16,6 +15,9 @@ app.add_middleware(
 
 app.include_router(health.router, prefix="/api/v1", tags=["health"])
 app.include_router(user.router, prefix="/api/v1/user", tags=["user"])
+app.include_router(spot.router, prefix="/api/v1/spot", tags=["spot"])
+app.include_router(favorite.router, prefix="/api/v1/favorite", tags=["favorite"])
+
 
 @app.get("/")
 def root():
