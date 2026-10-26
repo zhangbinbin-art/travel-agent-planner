@@ -127,7 +127,7 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts/core'
 import { GraphChart } from 'echarts/charts'
-import { TooltipComponent } from 'echarts/components'
+import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { getSpotList } from '@/api/spot'
 import { getMyFavoriteSpots } from '@/api/favorite'
@@ -137,7 +137,7 @@ import { auth } from '@/utils/auth'
 const router = useRouter()
 
 // 按需注册 ECharts 模块，避免整包引入导致 Plan 页 chunk 过大
-echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
+echarts.use([GraphChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const spots = ref([])
 const spotsLoading = ref(false)
