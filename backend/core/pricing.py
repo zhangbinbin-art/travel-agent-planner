@@ -21,3 +21,10 @@ def get_ticket_price(name: Optional[str]) -> float:
     if not name:
         return DEFAULT_TICKET_PRICE
     return TICKET_PRICES.get(name, DEFAULT_TICKET_PRICE)
+
+
+# 食宿与交通是项目内置的演示单价，统一放在这里，方便答辩前一处修改即可。
+# 单日食宿默认单价（元/人/天），前端可覆盖，后端在未传值时使用。
+DEFAULT_HOTEL_PER_DAY = 300.0
+# 每公里交通单价（元/km），仅后端配置，前端不可编辑。
+TRAFFIC_PRICE_PER_KM = 1.5

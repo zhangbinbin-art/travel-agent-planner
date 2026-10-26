@@ -7,7 +7,10 @@
           途经 {{ trip.spot_count }} 个景点 · 总距离 {{ formatDistance(trip.total_distance) }} km · 创建时间 {{ formatTime(trip.created_at) }}
         </div>
         <div v-if="trip.budget" class="budget-meta">
-          门票 ¥{{ formatMoney(trip.budget.ticket_total) }} · 日均 ¥{{ formatMoney(trip.budget.daily_average) }}
+          <div>门票 ¥{{ formatMoney(trip.budget.ticket_total ?? 0) }} · 食宿 ¥{{ formatMoney(trip.budget.hotel_total ?? 0) }} · 交通 ¥{{ formatMoney(trip.budget.traffic_total ?? 0) }}</div>
+          <div class="budget-daily">
+            <span class="budget-total">总计 ¥{{ formatMoney(trip.budget.grand_total ?? 0) }}</span> · 日均 ¥{{ formatMoney(trip.budget.daily_avg ?? 0) }}
+          </div>
         </div>
       </div>
       <div class="actions">
@@ -90,6 +93,14 @@ const onDelete = () => {
   margin-top: 6px;
   color: #e6a23c;
   font-size: 13px;
+}
+.budget-total {
+  color: #303133;
+  font-weight: 600;
+}
+.budget-daily {
+  color: #909399;
+  font-size: 12px;
 }
 .actions {
   display: flex;

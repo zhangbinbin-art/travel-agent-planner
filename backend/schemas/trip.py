@@ -7,6 +7,7 @@ class TripGenerateRequest(BaseModel):
     spot_ids: List[int] = Field(..., min_length=2)
     start_spot_id: int
     days: int = Field(1, ge=1, le=30)
+    hotel_per_day: Optional[float] = Field(None, ge=0, le=100000)
 
 
 class TripSaveRequest(BaseModel):
@@ -14,6 +15,7 @@ class TripSaveRequest(BaseModel):
     spot_ids: List[int] = Field(..., min_length=2)
     start_spot_id: int
     days: int = Field(1, ge=1, le=30)
+    hotel_per_day: Optional[float] = Field(None, ge=0, le=100000)
 
 
 class RouteSpot(BaseModel):
@@ -42,7 +44,11 @@ class TripBudget(BaseModel):
     days: int
     items: List[BudgetItem]
     ticket_total: float
-    daily_average: float
+    hotel_total: float
+    traffic_total: float
+    grand_total: float
+    daily_avg: float          # 总预算日均 = grand_total / days
+    daily_average: float = 0  # 兼容 v0.8：门票日均 = ticket_total / days（保留，勿删）
 
 
 class TripGenerateResponse(BaseModel):

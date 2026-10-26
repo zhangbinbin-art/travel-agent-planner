@@ -1,12 +1,15 @@
 import heapq
 import json
+import urllib.parse
+import urllib.request
 from hashlib import md5
 from math import hypot, inf
 from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
-from core.pricing import get_ticket_price
+from core.config import settings
+from core.pricing import DEFAULT_HOTEL_PER_DAY, TRAFFIC_PRICE_PER_KM, get_ticket_price
 from models import Spot, Trip
 from schemas.trip import RouteLeg, RouteSpot
 
@@ -47,16 +50,106 @@ def get_spot_point(spot: Spot) -> Tuple[float, float]:
     return (round(base_x + dx, 2), round(base_y + dy, 2))
 
 
-def get_distance(spot_a: Spot, spot_b: Spot) -> float:
-    """模拟距离（1 坐标单位≈1km），预留替换为真实地理距离(Haversine)的接口。
+def _mock_distance(spot_a: Spot, spot_b: Spot) -> float:
+    """模拟距离（1 坐标单位≈1km），保留 v0.8 的确定性算法。
 
-    当前项目没有真实经纬度数据，先用确定性的模拟坐标计算欧氏距离。
-    后续若接入真实经纬度，只需要替换本函数实现，图的构建、Dijkstra、
-    路线生成等上层逻辑都不用改动。
+    当前项目有可能没有真实经纬度数据，先用确定性的模拟坐标计算欧氏距离。
+    这是无密钥/无网络时的安全兜底，计算结果与 v0.7/v0.8 完全一致。
     """
     ax, ay = get_spot_point(spot_a)
     bx, by = get_spot_point(spot_b)
     return round(hypot(ax - bx, ay - by), 2)
+
+
+# 高德距离结果的内存缓存：key 为排序后的景点 id 元组，值为最终采用的公里数。
+# 缓存真实距离和模拟距离，避免重复调用高德接口，把每日额度消耗降到最低；
+# 查询失败时也会缓存兜底结果，使本次进程后续请求直接走模拟距离而不反复重试。
+_AMAP_CACHE: dict = {}
+
+
+def clear_distance_cache() -> None:
+    """清空距离缓存（测试或运行期手动刷新时使用）。"""
+    _AMAP_CACHE.clear()
+
+
+def _fetch_amap_distance(origin: Tuple[float, float], dest: Tuple[float, float]) -> Optional[float]:
+    """调用高德驾车距离矩阵，返回公里数；任何异常/非 1 状态/空结果都返回 None。
+
+    仅使用标准库 urllib，不引入额外依赖。参数 origin/dest 均为 (lng, lat)，
+    与高德接口要求的“经度在前、纬度在后”保持一致。
+    """
+    try:
+        if not settings.AMAP_KEY:
+            return None
+        params = urllib.parse.urlencode(
+            {
+                "origins": f"{origin[0]},{origin[1]}",
+                "destination": f"{dest[0]},{dest[1]}",
+                "type": 1,  # 1 表示驾车距离
+                "key": settings.AMAP_KEY,
+            }
+        )
+        url = "https://restapi.amap.com/v3/distance?" + params
+        with urllib.request.urlopen(url, timeout=3) as resp:
+            data = json.loads(resp.read().decode("utf-8"))
+
+        if data.get("status") != "1":
+            return None
+        results = data.get("results") or []
+        if not results:
+            return None
+        raw = results[0].get("distance")
+        if raw in (None, ""):
+            return None
+        meters = float(raw)
+        if meters <= 0:
+            return None
+        return round(meters / 1000, 2)
+    except Exception:
+        # 网络超时、DNS 失败、返回非 JSON、字段结构异常等一律降级，绝不向上抛出
+        return None
+
+
+def get_distance(spot_a: Spot, spot_b: Spot) -> float:
+    """返回两景点间距离（公里），优先真实驾车距离，失败时自动降级为模拟距离。
+
+    答辩时可自由切换真实距离/模拟距离——在 backend/.env 配 AMAP_KEY 即为真实距离，
+    留空即自动走原有 md5 模拟距离，没有任何密钥或额度风险；上层构图与 Dijkstra
+    完全不感知数据源，只消费本函数返回的公里数。
+    """
+    # 两个景点都有 id 时才可缓存；用排序后的元组保证 (a,b) 与 (b,a) 命中同一缓存
+    key = None
+    if spot_a.id is not None and spot_b.id is not None:
+        key = tuple(sorted((spot_a.id, spot_b.id)))
+        if key in _AMAP_CACHE:
+            return _AMAP_CACHE[key]
+
+    distance = None
+    # 只有配置了密钥且两个景点都有真实经纬度时才尝试调用高德
+    if (
+        settings.AMAP_KEY
+        and spot_a.lat is not None
+        and spot_a.lng is not None
+        and spot_b.lat is not None
+        and spot_b.lng is not None
+    ):
+        try:
+            candidate = _fetch_amap_distance(
+                (spot_a.lng, spot_a.lat),
+                (spot_b.lng, spot_b.lat),
+            )
+        except Exception:
+            # 距离源是可选增强，任何异常都必须降级为模拟距离，绝不影响路线生成
+            candidate = None
+        if candidate is not None and candidate > 0:
+            distance = candidate
+
+    if distance is None:
+        distance = _mock_distance(spot_a, spot_b)
+
+    if key is not None:
+        _AMAP_CACHE[key] = distance
+    return distance
 
 
 # ---------------------------------------------------------------------------
@@ -175,12 +268,14 @@ def _dedupe_keep_order(values: List[int]) -> List[int]:
     return result
 
 
-def compute_budget(route: List, days: int) -> dict:
-    """按路线顺序估算门票预算。
+def compute_budget(route: List, days: int, total_distance=0.0, hotel_per_day=None) -> dict:
+    """按路线顺序估算三类预算：门票、食宿、交通。
 
     路线元素可以是 RouteSpot 模型，也可以是保存到 route_json 后的字典。
-    门票单价按景点名称从 core.pricing 读取，未知名称使用默认价格。
-    返回 TripBudget 字段：days / items / ticket_total / daily_average。
+    - 门票：按景点名称从 core.pricing 读取单价，未知名称使用默认价格；
+    - 食宿：天数 * 每日食宿单价（未传时使用 DEFAULT_HOTEL_PER_DAY）；
+    - 交通：总里程 * 每公里交通单价（TRAFFIC_PRICE_PER_KM，仅后端配置）。
+    返回 TripBudget 全部字段，其中 daily_average 保留 v0.8 的“门票日均”语义。
     """
     safe_days = days if days and days >= 1 else 1
     items = []
@@ -200,16 +295,32 @@ def compute_budget(route: List, days: int) -> dict:
         )
 
     ticket_total = round(sum(item["ticket_price"] for item in items), 2)
+    safe_hotel = DEFAULT_HOTEL_PER_DAY if hotel_per_day is None else float(hotel_per_day)
+    hotel_total = round(safe_days * safe_hotel, 2)
+    traffic_total = round(float(total_distance or 0) * TRAFFIC_PRICE_PER_KM, 2)
+    grand_total = round(ticket_total + hotel_total + traffic_total, 2)
+    daily_avg = round(grand_total / safe_days, 2)
+    # v0.8 语义：daily_average 仍表示“门票日均”，保留给旧前端使用
     daily_average = round(ticket_total / safe_days, 2)
     return {
         "days": safe_days,
         "items": items,
         "ticket_total": ticket_total,
+        "hotel_total": hotel_total,
+        "traffic_total": traffic_total,
+        "grand_total": grand_total,
+        "daily_avg": daily_avg,
         "daily_average": daily_average,
     }
 
 
-def generate_route(db: Session, spot_ids: List[int], start_spot_id: int, days: int = 1) -> dict:
+def generate_route(
+    db: Session,
+    spot_ids: List[int],
+    start_spot_id: int,
+    days: int = 1,
+    hotel_per_day=None,
+) -> dict:
     """根据用户选择的景点生成一条游览路线。
 
     思路：
@@ -310,6 +421,9 @@ def generate_route(db: Session, spot_ids: List[int], start_spot_id: int, days: i
     total_distance = round(sum(leg.distance for leg in legs), 2)
 
     safe_days = days if days and days >= 1 else 1
+    # 解析每日食宿单价，未传时使用 pricing 中的默认值，便于保存时一并持久化
+    safe_hotel_value = DEFAULT_HOTEL_PER_DAY if hotel_per_day is None else float(hotel_per_day)
+    budget = compute_budget(route, safe_days, total_distance, hotel_per_day)
     return {
         "spot_ids": walk_order,
         "route": route,
@@ -317,13 +431,22 @@ def generate_route(db: Session, spot_ids: List[int], start_spot_id: int, days: i
         "total_distance": total_distance,
         "start_spot_id": start,
         "days": safe_days,
-        "budget": compute_budget(route, safe_days),
+        "hotel_per_day": safe_hotel_value,
+        "budget": budget,
     }
 
 
-def save_trip(db: Session, user_id: int, name: str, spot_ids: List[int], start_spot_id: int, days: int = 1) -> Trip:
+def save_trip(
+    db: Session,
+    user_id: int,
+    name: str,
+    spot_ids: List[int],
+    start_spot_id: int,
+    days: int = 1,
+    hotel_per_day=None,
+) -> Trip:
     """保存路线：始终服务端重算，绝不信任客户端传来的路线结果。"""
-    result = generate_route(db, spot_ids, start_spot_id, days)
+    result = generate_route(db, spot_ids, start_spot_id, days, hotel_per_day)
 
     payload = {
         "spot_ids": result["spot_ids"],
@@ -331,6 +454,7 @@ def save_trip(db: Session, user_id: int, name: str, spot_ids: List[int], start_s
         "route": [item.model_dump() for item in result["route"]],
         "legs": [leg.model_dump() for leg in result["legs"]],
         "days": result["days"],
+        "hotel_per_day": result["hotel_per_day"],
         "budget": result["budget"],
     }
 
@@ -365,6 +489,22 @@ def parse_route(trip: Trip) -> dict:
     return result
 
 
+# v0.9 新增的预算字段：旧路线（v0.8）的 stored budget 缺少这些字段
+_BUDGET_V09_FIELDS = ("hotel_total", "traffic_total", "grand_total", "daily_avg")
+
+
+def _resolve_budget(route_data: dict, route: List, days: int, total_distance) -> dict:
+    """优先复用已保存的预算，存量旧路线则重新计算完整预算。
+
+    已保存的 v0.9 预算直接返回（保持原值，不重算）；若 stored budget 缺少任一
+    v0.9 字段（v0.8 存量数据），则按当前配置重新计算，保证响应模型校验通过。
+    """
+    stored = route_data.get("budget")
+    if isinstance(stored, dict) and all(field in stored for field in _BUDGET_V09_FIELDS):
+        return stored
+    return compute_budget(route, days, total_distance or 0, route_data.get("hotel_per_day"))
+
+
 def get_my_trips(db: Session, user_id: int, page: int, page_size: int) -> dict:
     """分页返回当前用户的路线列表，按创建时间倒序（同一时间按 id 倒序）。"""
     query = db.query(Trip).filter(Trip.user_id == user_id)
@@ -381,7 +521,7 @@ def get_my_trips(db: Session, user_id: int, page: int, page_size: int) -> dict:
         route_data = parse_route(trip)
         route = route_data.get("route") or []
         days = route_data.get("days") or 1
-        budget = route_data.get("budget") or compute_budget(route, days)
+        budget = _resolve_budget(route_data, route, days, trip.total_distance)
         items.append(
             {
                 "id": trip.id,
@@ -412,7 +552,7 @@ def build_detail(trip: Trip) -> dict:
     route_data = parse_route(trip)
     route = route_data.get("route") or []
     days = route_data.get("days") or 1
-    budget = route_data.get("budget") or compute_budget(route, days)
+    budget = _resolve_budget(route_data, route, days, trip.total_distance)
     return {
         "id": trip.id,
         "name": trip.name,

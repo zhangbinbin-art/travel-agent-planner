@@ -8,6 +8,7 @@ favorites / trips 数据，绝不触碰其他业务表。
 import json
 import os
 import sys
+from types import SimpleNamespace
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
@@ -18,7 +19,8 @@ from sqlalchemy.exc import IntegrityError
 from core.config import settings
 from core.database import SessionLocal
 from main import app
-from models import Favorite, Trip, User
+from models import Favorite, Spot, Trip, User
+from services import trip_service
 
 c = TestClient(app)
 passed = 0
@@ -82,6 +84,8 @@ def cleanup_test_users():
 
 def main():
     print("=== v08 test start ===")
+    # 测试全程离线：清空密钥，确保 get_distance 只走模拟距离，绝不访问真实高德接口
+    settings.AMAP_KEY = ""
     cleanup_test_users()
 
     admin_token = login("admin", "admin123")
@@ -279,6 +283,186 @@ def main():
     legacy_expected = round(sum(it["ticket_price"] for it in legacy_budget["items"]), 2)
     ok("legacy trip ticket_total", legacy_budget["ticket_total"] == legacy_expected, legacy_budget)
     ok("legacy trip daily_average", legacy_budget["daily_average"] == round(legacy_expected / 1, 2), legacy_budget)
+    # E) v0.9：旧路线重算后必须带齐新的预算字段
+    ok(
+        "legacy trip budget has v09 fields",
+        all(k in legacy_budget for k in ("hotel_total", "traffic_total", "grand_total", "daily_avg")),
+        legacy_budget,
+    )
+    ok(
+        "legacy trip grand_total formula",
+        legacy_budget["grand_total"]
+        == round(legacy_budget["ticket_total"] + legacy_budget["hotel_total"] + legacy_budget["traffic_total"], 2),
+        legacy_budget,
+    )
+    ok(
+        "legacy trip daily_avg formula",
+        legacy_budget["daily_avg"] == round(legacy_budget["grand_total"] / legacy_detail["days"], 2),
+        legacy_budget,
+    )
+
+    # ---- A) 预算：默认食宿单价 ----
+    r = c.post(
+        "/api/v1/trip/generate",
+        json={"spot_ids": [1, 2], "start_spot_id": 1, "days": 3},
+        headers=h(a_token),
+    )
+    ok("A generate days3 no hotel -> 200", r.status_code == 200, r.status_code)
+    gen_a = r.json()
+    budget_a = gen_a["budget"]
+    ok("A hotel_total default 900", budget_a.get("hotel_total") == round(3 * 300.0, 2), budget_a.get("hotel_total"))
+    ok(
+        "A traffic_total formula",
+        budget_a.get("traffic_total") == round(gen_a["total_distance"] * 1.5, 2),
+        budget_a.get("traffic_total"),
+    )
+    ok(
+        "A grand_total formula",
+        budget_a.get("grand_total")
+        == round(budget_a["ticket_total"] + 900.0 + budget_a["traffic_total"], 2),
+        budget_a.get("grand_total"),
+    )
+    ok("A daily_avg formula", budget_a.get("daily_avg") == round(budget_a["grand_total"] / 3, 2), budget_a.get("daily_avg"))
+    ok(
+        "A daily_average legacy formula",
+        budget_a.get("daily_average") == round(budget_a["ticket_total"] / 3, 2),
+        budget_a.get("daily_average"),
+    )
+
+    # ---- B) 预算：自定义每日食宿单价 + 保存后回读 ----
+    r = c.post(
+        "/api/v1/trip/generate",
+        json={"spot_ids": [1, 2], "start_spot_id": 1, "days": 2, "hotel_per_day": 500},
+        headers=h(a_token),
+    )
+    ok("B generate days2 hotel500 -> 200", r.status_code == 200, r.status_code)
+    gen_b = r.json()
+    ok("B generated hotel_total 1000", gen_b["budget"].get("hotel_total") == 1000.0, gen_b["budget"].get("hotel_total"))
+    ok(
+        "B generated grand_total consistent",
+        gen_b["budget"].get("grand_total")
+        == round(gen_b["budget"]["ticket_total"] + gen_b["budget"]["hotel_total"] + gen_b["budget"]["traffic_total"], 2),
+        gen_b["budget"],
+    )
+
+    r = c.post(
+        "/api/v1/trip/save",
+        json={
+            "name": "v09 hotel trip",
+            "spot_ids": [1, 2],
+            "start_spot_id": 1,
+            "days": 2,
+            "hotel_per_day": 500,
+        },
+        headers=h(a_token),
+    )
+    ok("B save days2 hotel500 -> 200", r.status_code == 200, r.status_code)
+    saved_b = r.json()
+    b_trip_id = saved_b["id"]
+    ok("B saved hotel_total 1000", saved_b["budget"].get("hotel_total") == 1000.0, saved_b["budget"])
+    ok(
+        "B saved grand_total consistent",
+        saved_b["budget"].get("grand_total")
+        == round(
+            saved_b["budget"]["ticket_total"]
+            + saved_b["budget"]["hotel_total"]
+            + saved_b["budget"]["traffic_total"],
+            2,
+        ),
+        saved_b["budget"],
+    )
+    r = c.get(f"/api/v1/trip/{b_trip_id}", headers=h(a_token))
+    ok("B detail -> 200", r.status_code == 200, r.status_code)
+    detail_b = r.json()
+    ok("B detail hotel_total 1000", detail_b["budget"].get("hotel_total") == 1000.0, detail_b["budget"])
+    ok(
+        "B detail grand_total consistent",
+        detail_b["budget"].get("grand_total")
+        == round(
+            detail_b["budget"]["ticket_total"]
+            + detail_b["budget"]["hotel_total"]
+            + detail_b["budget"]["traffic_total"],
+            2,
+        ),
+        detail_b["budget"],
+    )
+    r = c.delete(f"/api/v1/trip/{b_trip_id}", headers=h(a_token))
+    ok("B delete saved trip -> 200", r.status_code == 200, r.status_code)
+
+    # ---- C) 距离缓存：相同/反向参数只调用一次高德 ----
+    db = SessionLocal()
+    try:
+        coord_rows = (
+            db.query(Spot)
+            .filter(Spot.lat.isnot(None), Spot.lng.isnot(None))
+            .order_by(Spot.id)
+            .all()
+        )
+        coord_points = [
+            SimpleNamespace(id=s.id, name=s.name, city=s.city, lat=s.lat, lng=s.lng)
+            for s in coord_rows
+        ]
+    finally:
+        db.close()
+    ok("C at least 3 spots have coordinates", len(coord_points) >= 3, len(coord_points))
+
+    original_fetch = trip_service._fetch_amap_distance
+    try:
+        calls = {"n": 0}
+
+        def counting_stub(origin, dest):
+            calls["n"] += 1
+            return 12.34
+
+        trip_service._fetch_amap_distance = counting_stub
+        settings.AMAP_KEY = "fake-key-for-test"
+        trip_service.clear_distance_cache()
+        point_a, point_b, point_c = coord_points[0], coord_points[1], coord_points[2]
+
+        first = trip_service.get_distance(point_a, point_b)
+        second = trip_service.get_distance(point_a, point_b)
+        ok("C stub called once for repeated call", calls["n"] == 1, calls["n"])
+        ok("C first distance 12.34", first == 12.34, first)
+        ok("C second distance cached 12.34", second == 12.34, second)
+        reversed_hit = trip_service.get_distance(point_b, point_a)
+        ok("C reversed args hit cache", calls["n"] == 1 and reversed_hit == 12.34, (calls["n"], reversed_hit))
+
+        # ---- D) 高德异常 / 空密钥时自动降级为模拟距离 ----
+        trip_service.clear_distance_cache()
+        settings.AMAP_KEY = "fake-key-for-test"
+
+        def raising_stub(origin, dest):
+            raise RuntimeError("amap down")
+
+        trip_service._fetch_amap_distance = raising_stub
+        expected_mock = trip_service._mock_distance(point_b, point_c)
+        raised = False
+        got = None
+        try:
+            got = trip_service.get_distance(point_b, point_c)
+        except Exception:
+            raised = True
+        ok("D fallback does not raise", raised is False, raised)
+        ok("D fallback equals mock distance", got == expected_mock, (got, expected_mock))
+
+        empty_calls = {"n": 0}
+
+        def unused_stub(origin, dest):
+            empty_calls["n"] += 1
+            return 99.99
+
+        trip_service._fetch_amap_distance = unused_stub
+        settings.AMAP_KEY = ""
+        trip_service.clear_distance_cache()
+        expected_mock_empty = trip_service._mock_distance(point_b, point_c)
+        got_empty = trip_service.get_distance(point_b, point_c)
+        ok("D empty key returns mock", got_empty == expected_mock_empty, (got_empty, expected_mock_empty))
+        ok("D empty key skips amap", empty_calls["n"] == 0, empty_calls["n"])
+    finally:
+        # 无论成功失败都恢复真实函数/空密钥，清掉缓存，保证不污染其他用例
+        trip_service._fetch_amap_distance = original_fetch
+        settings.AMAP_KEY = ""
+        trip_service.clear_distance_cache()
 
     # ---- 清理本脚本创建的数据 ----
     cleanup_test_users()

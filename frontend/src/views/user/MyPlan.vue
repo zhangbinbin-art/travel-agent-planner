@@ -38,8 +38,11 @@
           <div class="detail-row"><span class="label">途经景点数：</span>{{ detail.spot_count }}</div>
           <template v-if="detail.budget">
             <div class="detail-row"><span class="label">游玩天数：</span>{{ detail.budget.days }} 天</div>
-            <div class="detail-row"><span class="label">门票合计：</span>¥{{ formatMoney(detail.budget.ticket_total) }}</div>
-            <div class="detail-row"><span class="label">日均预算：</span>¥{{ formatMoney(detail.budget.daily_average) }}</div>
+            <div class="detail-row"><span class="label">门票合计：</span>¥{{ formatMoney(detail.budget.ticket_total ?? 0) }}</div>
+            <div class="detail-row"><span class="label">食宿费用：</span>¥{{ formatMoney(detail.budget.hotel_total ?? 0) }}</div>
+            <div class="detail-row"><span class="label">交通费用：</span>¥{{ formatMoney(detail.budget.traffic_total ?? 0) }}</div>
+            <div class="detail-row"><span class="label">总预算：</span>¥{{ formatMoney(detail.budget.grand_total ?? 0) }}</div>
+            <div class="detail-row"><span class="label">日均预算：</span>¥{{ formatMoney(detail.budget.daily_avg ?? 0) }}</div>
             <div class="ticket-list">
               <div v-for="item in (detail.budget.items || [])" :key="item.spot_id" class="ticket-item">
                 <span>{{ item.name }}</span>

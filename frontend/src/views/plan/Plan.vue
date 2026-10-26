@@ -36,6 +36,11 @@
               <div class="section-label">游玩天数</div>
               <el-input-number v-model="days" :min="1" :max="30" />
             </div>
+            <div class="hotel-section">
+              <div class="section-label">单日食宿费用（元/天）</div>
+              <el-input-number v-model="hotelPerDay" :min="0" :max="100000" :step="50" />
+            </div>
+            <div class="hotel-hint">交通单价由系统预设，不可修改</div>
             <el-divider />
             <div class="start-section">
               <div class="section-label">起点景点</div>
@@ -70,13 +75,25 @@
                 <span>门票 ¥{{ formatMoney(item.ticket_price) }}</span>
               </div>
               <el-divider class="budget-divider" />
-              <div class="budget-row budget-total">
+              <div class="budget-row">
                 <span>门票合计</span>
-                <span>¥{{ formatMoney(routeData.budget.ticket_total) }}</span>
+                <span>¥{{ formatMoney(routeData.budget.ticket_total ?? 0) }}</span>
+              </div>
+              <div class="budget-row">
+                <span>食宿费用（{{ routeData.budget.days }} 天 × ¥{{ formatMoney(generatedHotelPerDay ?? hotelPerDay) }}/天）</span>
+                <span>¥{{ formatMoney(routeData.budget.hotel_total ?? 0) }}</span>
+              </div>
+              <div class="budget-row">
+                <span>交通费用（{{ formatDistance(routeData.total_distance) }} km）</span>
+                <span>¥{{ formatMoney(routeData.budget.traffic_total ?? 0) }}</span>
+              </div>
+              <div class="budget-row budget-total">
+                <span>总预算</span>
+                <span class="highlight">¥{{ formatMoney(routeData.budget.grand_total ?? 0) }}</span>
               </div>
               <div class="budget-row">
                 <span>日均预算（按 {{ routeData.budget.days }} 天）</span>
-                <span class="highlight">¥{{ formatMoney(routeData.budget.daily_average) }}</span>
+                <span class="highlight">¥{{ formatMoney(routeData.budget.daily_avg ?? 0) }}</span>
               </div>
             </div>
             <div v-else class="budget-empty">暂无预算信息</div>
@@ -130,6 +147,10 @@ const candidateTab = ref('all')
 const selectedSpotIds = ref([])
 const startSpotId = ref(null)
 const days = ref(2)
+const hotelPerDay = ref(300)
+// 生成路线时实际使用的食宿单价快照：预算展示与保存都以它为准，
+// 避免用户生成后又改输入框导致“看到的预算”和“保存的预算”不一致。
+const generatedHotelPerDay = ref(null)
 
 const generating = ref(false)
 const routeData = ref(null)
@@ -255,13 +276,16 @@ const handleGenerate = async () => {
   }
   generating.value = true
   routeData.value = null
+  const sentHotelPerDay = hotelPerDay.value
   try {
     const res = await generateTrip({
       spot_ids: selectedSpotIds.value,
       start_spot_id: startSpotId.value,
-      days: days.value
+      days: days.value,
+      hotel_per_day: sentHotelPerDay
     })
     routeData.value = res.data
+    generatedHotelPerDay.value = sentHotelPerDay
     planName.value = ''
     await nextTick()
     initChart()
@@ -277,6 +301,7 @@ const handleReset = () => {
   startSpotId.value = null
   routeData.value = null
   planName.value = ''
+  generatedHotelPerDay.value = null
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null
@@ -383,7 +408,9 @@ const handleSave = async () => {
       name: planName.value.trim(),
       spot_ids: orderedRouteIds,
       start_spot_id: startSpotId.value,
-      days: days.value
+      // 保存与预览保持一致：使用生成时快照的天数与食宿单价
+      days: routeData.value.budget?.days ?? days.value,
+      hotel_per_day: generatedHotelPerDay.value ?? hotelPerDay.value
     })
     ElMessage.success('保存成功')
     try {
@@ -448,6 +475,19 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 12px;
   margin-top: 16px;
+}
+.hotel-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
+  flex-wrap: wrap;
+}
+.hint,
+.hotel-hint {
+  color: #909399;
+  font-size: 12px;
+  margin-top: 6px;
 }
 .spot-group {
   display: flex;

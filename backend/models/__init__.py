@@ -22,6 +22,8 @@ class Spot(Base):
     tags = Column(String(255))
     description = Column(Text)
     score = Column(Float, default=0)
+    lat = Column(Float, nullable=True)
+    lng = Column(Float, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

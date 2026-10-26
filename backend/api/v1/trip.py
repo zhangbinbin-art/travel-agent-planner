@@ -25,7 +25,13 @@ def generate_trip(
     current_user: User = Depends(get_current_user),
 ):
     try:
-        return trip_service.generate_route(db, payload.spot_ids, payload.start_spot_id, payload.days)
+        return trip_service.generate_route(
+            db,
+            payload.spot_ids,
+            payload.start_spot_id,
+            payload.days,
+            hotel_per_day=payload.hotel_per_day,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
 
@@ -44,6 +50,7 @@ def save_trip(
             spot_ids=payload.spot_ids,
             start_spot_id=payload.start_spot_id,
             days=payload.days,
+            hotel_per_day=payload.hotel_per_day,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
