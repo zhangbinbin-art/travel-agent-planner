@@ -17,7 +17,8 @@ const routes = [
       { path: 'user', name: 'UserCenter', component: () => import('@/views/user/UserCenter.vue') },
       { path: 'user/my-plan', name: 'MyPlan', component: () => import('@/views/user/MyPlan.vue') },
       { path: 'plan', name: 'Plan', component: () => import('@/views/plan/Plan.vue') },
-      { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') }
+      { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') },
+      { path: 'admin/post-review', name: 'AdminPostReview', component: () => import('@/views/admin/PostReview.vue') }
     ]
   },
   { path: '/login', name: 'Login', component: () => import('@/views/auth/Login.vue') },

@@ -15,16 +15,31 @@
       <div class="post-meta">
         <span>作者：{{ authorName }}</span>
         <span>发布时间：{{ formattedTime }}</span>
+        <span>浏览：{{ post.view_count ?? 0 }}</span>
+        <span>点赞：{{ post.like_count ?? 0 }}</span>
+        <span>评论：{{ post.comment_count ?? 0 }}</span>
         <span>热度：{{ post.heat ?? 0 }}</span>
+        <el-tag v-if="canManage && post.status !== 1" :type="post.status === 2 ? 'danger' : 'warning'" size="small">
+          {{ post.status_text || (post.status === 0 ? '待审核' : '已驳回') }}
+        </el-tag>
+        <span v-if="canManage && post.status !== 1" class="status-hint">审核通过后才会公开展示</span>
       </div>
       <el-divider />
+      <div v-if="post.cover" class="post-cover-wrap">
+        <img :src="post.cover" class="post-cover" alt="cover" @error="onCoverError" />
+      </div>
       <div class="post-content">{{ post.content }}</div>
+      <div class="post-actions-row">
+        <el-button :type="post.liked ? 'primary' : 'default'" @click="handleLike">
+          {{ post.liked ? '已点赞' : '点赞' }}（{{ post.like_count ?? 0 }}）
+        </el-button>
+      </div>
 
-      <el-divider content-position="left">评论 ({{ comments.length }})</el-divider>
+      <el-divider content-position="left">评论 ({{ commentTotal }})</el-divider>
 
       <div v-if="!auth.token" class="comment-login">
-        <el-input readonly placeholder="登录后参与评论" class="login-input" @click="promptLogin" />
-        <el-button type="primary" @click="promptLogin">登录</el-button>
+        <span>请先登录后评论</span>
+        <el-button type="primary" link @click="promptLogin">去登录</el-button>
       </div>
       <div v-else class="comment-form">
         <el-input
@@ -49,20 +64,38 @@
               <span class="comment-author">{{ c.author?.username || '匿名' }}</span>
               <span class="comment-time">{{ formatTime(c.created_at) }}</span>
               <el-tag size="small" type="warning">{{ c.score }} 分</el-tag>
+              <el-tag v-if="c.status !== undefined && c.status !== 1" size="small" :type="c.status === 2 ? 'danger' : 'warning'">
+                {{ c.status_text || (c.status === 0 ? '待审核' : '已驳回') }}
+              </el-tag>
             </div>
-            <el-button
-              v-if="canDeleteComment(c)"
-              size="small"
-              type="danger"
-              @click="handleDeleteComment(c)"
-            >
-              删除
-            </el-button>
+            <div class="comment-actions">
+              <el-button size="small" :type="c.liked ? 'primary' : 'default'" @click="handleLikeComment(c)">
+                点赞（{{ c.like_count ?? 0 }}）
+              </el-button>
+              <el-button
+                v-if="canDeleteComment(c)"
+                size="small"
+                type="danger"
+                @click="handleDeleteComment(c)"
+              >
+                删除
+              </el-button>
+            </div>
           </div>
           <div class="comment-content">{{ c.content }}</div>
         </el-card>
         <el-empty v-if="!comments.length" description="暂无评论" />
       </div>
+      <el-pagination
+        v-if="commentTotal > 0"
+        class="comment-pager"
+        background
+        layout="prev, pager, next"
+        :total="commentTotal"
+        :page-size="commentPageSize"
+        :current-page="commentPage"
+        @current-change="handleCommentPageChange"
+      />
     </el-card>
   </div>
 </template>
@@ -71,8 +104,8 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { getPostDetail, deletePost } from '@/api/post'
-import { createComment, deleteComment } from '@/api/comment'
+import { getPostDetail, deletePost, likePost, getCommentList, createPostComment } from '@/api/post'
+import { deleteComment, likeComment } from '@/api/comment'
 import { auth } from '@/utils/auth'
 
 const route = useRoute()
@@ -84,6 +117,10 @@ const loading = ref(false)
 const submitting = ref(false)
 const commentContent = ref('')
 const commentScore = ref(5)
+const coverError = ref(false)
+const commentPage = ref(1)
+const commentPageSize = ref(10)
+const commentTotal = ref(0)
 
 const canManage = computed(
   () =>
@@ -121,12 +158,30 @@ const promptLogin = () => {
   router.push({ path: '/login', query: { redirect: route.fullPath } })
 }
 
+const onCoverError = () => {
+  coverError.value = true
+}
+
+const fetchComments = async () => {
+  try {
+    const res = await getCommentList(route.params.id, {
+      page: commentPage.value,
+      page_size: commentPageSize.value
+    })
+    comments.value = res.data?.items || []
+    commentTotal.value = res.data?.total || 0
+  } catch (e) {
+    comments.value = []
+    commentTotal.value = 0
+  }
+}
+
 const fetchDetail = async () => {
   loading.value = true
   try {
     const res = await getPostDetail(route.params.id)
     post.value = res.data || null
-    comments.value = res.data?.comments || []
+    await fetchComments()
   } catch (e) {
     if (e?.response?.status === 404) {
       ElMessage.error('游记不存在')
@@ -137,6 +192,11 @@ const fetchDetail = async () => {
   } finally {
     loading.value = false
   }
+}
+
+const handleCommentPageChange = (p) => {
+  commentPage.value = p
+  fetchComments()
 }
 
 const goList = () => {
@@ -170,6 +230,36 @@ const handleDeletePost = async () => {
   }
 }
 
+const handleLike = async () => {
+  if (!auth.token) {
+    promptLogin()
+    return
+  }
+  try {
+    const res = await likePost(post.value.id)
+    if (post.value) {
+      post.value.liked = res.data?.liked
+      post.value.like_count = res.data?.like_count
+    }
+  } catch (e) {
+    ElMessage.error(extractError(e, '点赞失败'))
+  }
+}
+
+const handleLikeComment = async (comment) => {
+  if (!auth.token) {
+    promptLogin()
+    return
+  }
+  try {
+    const res = await likeComment(comment.id)
+    comment.liked = res.data?.liked
+    comment.like_count = res.data?.like_count
+  } catch (e) {
+    ElMessage.error(extractError(e, '点赞失败'))
+  }
+}
+
 const handleSubmitComment = async () => {
   if (!auth.token) {
     promptLogin()
@@ -181,14 +271,18 @@ const handleSubmitComment = async () => {
   }
   submitting.value = true
   try {
-    await createComment(route.params.id, {
+    await createPostComment(route.params.id, {
       content: commentContent.value.trim(),
       score: commentScore.value
     })
     ElMessage.success('评论成功')
     commentContent.value = ''
     commentScore.value = 5
-    await fetchDetail()
+    commentPage.value = 1
+    await fetchComments()
+    if (post.value) {
+      post.value.comment_count = (post.value.comment_count || 0) + 1
+    }
   } catch (e) {
     ElMessage.error(extractError(e, '评论失败'))
   } finally {
@@ -209,7 +303,10 @@ const handleDeleteComment = async (comment) => {
   try {
     await deleteComment(comment.id)
     ElMessage.success('删除成功')
-    await fetchDetail()
+    await fetchComments()
+    if (post.value && post.value.comment_count > 0) {
+      post.value.comment_count -= 1
+    }
   } catch (e) {
     ElMessage.error(extractError(e, '删除失败'))
   }

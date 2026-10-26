@@ -1,10 +1,22 @@
 <template>
   <el-card shadow="hover" class="post-card" @click="goDetail">
+    <div class="post-cover-wrap">
+      <img
+        v-if="post.cover && !coverError"
+        :src="post.cover"
+        class="post-cover"
+        alt="cover"
+        @error="onCoverError"
+      />
+      <div v-else class="post-cover-placeholder"></div>
+    </div>
     <div class="post-title" :title="post.title">{{ post.title }}</div>
     <div class="post-preview">{{ preview }}</div>
     <div class="post-meta">
       <span class="post-author">{{ authorName }}</span>
-      <span class="post-heat">热度 {{ post.heat ?? 0 }}</span>
+      <span class="post-stat">点赞 {{ post.like_count ?? 0 }}</span>
+      <span class="post-stat">浏览 {{ post.view_count ?? 0 }}</span>
+      <span class="post-stat">评论 {{ post.comment_count ?? 0 }}</span>
       <span class="post-time">{{ formattedTime }}</span>
     </div>
     <div v-if="canManage" class="post-actions">
@@ -15,7 +27,7 @@
 </template>
 
 <script setup>
-import { computed } from 'vue'
+import { computed, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { auth } from '@/utils/auth'
 
@@ -29,9 +41,14 @@ const props = defineProps({
 const emit = defineEmits(['edit', 'delete'])
 
 const router = useRouter()
+const coverError = ref(false)
 
 const goDetail = () => {
   router.push(`/post-detail/${props.post.id}`)
+}
+
+const onCoverError = () => {
+  coverError.value = true
 }
 
 const preview = computed(() => {
@@ -62,6 +79,25 @@ function formatTime(value) {
   cursor: pointer;
   height: 100%;
 }
+.post-cover-wrap {
+  width: 100%;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  border-radius: 6px;
+  margin-bottom: 10px;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e4e7ed 100%);
+}
+.post-cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
+}
+.post-cover-placeholder {
+  width: 100%;
+  height: 100%;
+  background: linear-gradient(135deg, #f5f7fa 0%, #e4e7ed 100%);
+}
 .post-title {
   font-weight: 600;
   font-size: 16px;
@@ -78,7 +114,7 @@ function formatTime(value) {
 .post-meta {
   display: flex;
   align-items: center;
-  justify-content: space-between;
+  flex-wrap: wrap;
   gap: 8px;
   color: #909399;
   font-size: 12px;
@@ -90,11 +126,12 @@ function formatTime(value) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.post-heat {
-  color: #f59e0b;
+.post-stat {
+  color: #606266;
 }
 .post-time {
   white-space: nowrap;
+  margin-left: auto;
 }
 .post-actions {
   display: flex;

@@ -7,3 +7,7 @@ export function createComment(postId, data) {
 export function deleteComment(commentId) {
   return api.delete(`/api/v1/comment/${commentId}`)
 }
+
+export function likeComment(commentId) {
+  return api.post(`/api/v1/comment/${commentId}/like`)
+}

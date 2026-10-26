@@ -1,7 +1,8 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Float, ForeignKey, Boolean
+from sqlalchemy import Column, Integer, String, DateTime, Text, Float, ForeignKey, Boolean, UniqueConstraint
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from core.database import Base
+
 
 class User(Base):
     __tablename__ = "users"
@@ -11,6 +12,7 @@ class User(Base):
     role = Column(String(20), default="user")  # guest/user/admin
     email = Column(String(100), unique=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
 
 class Spot(Base):
     __tablename__ = "spots"
@@ -22,15 +24,24 @@ class Spot(Base):
     score = Column(Float, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
+
 class Post(Base):
     __tablename__ = "posts"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
     title = Column(String(150), nullable=False)
     content = Column(Text)
+    cover = Column(String(255))
+    spot_ids = Column(Text, default="[]")
+    view_count = Column(Integer, default=0)
+    like_count = Column(Integer, default=0)
+    comment_count = Column(Integer, default=0)
     heat = Column(Integer, default=0)
+    status = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     author = relationship("User")
+
 
 class Comment(Base):
     __tablename__ = "comments"
@@ -41,7 +52,27 @@ class Comment(Base):
     content = Column(Text)
     sentiment = Column(String(20))  # positive/neutral/negative
     score = Column(Integer, default=5)
+    like_count = Column(Integer, default=0)
+    status = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+class PostLike(Base):
+    __tablename__ = "post_likes"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    post_id = Column(Integer, ForeignKey("posts.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("user_id", "post_id", name="uq_post_like_user_post"),)
+
+
+class CommentLike(Base):
+    __tablename__ = "comment_likes"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    comment_id = Column(Integer, ForeignKey("comments.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("user_id", "comment_id", name="uq_comment_like_user_comment"),)
 
 class Favorite(Base):
     __tablename__ = "favorites"

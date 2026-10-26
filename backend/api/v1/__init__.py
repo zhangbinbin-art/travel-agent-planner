@@ -1,3 +1,3 @@
-from api.v1 import health, user, spot, favorite, post, comment, trip
+from api.v1 import health, user, spot, favorite, post, comment, trip, admin
 
-__all__ = ["health", "user", "spot", "favorite", "post", "comment", "trip"]
+__all__ = ["health", "user", "spot", "favorite", "post", "comment", "trip", "admin"]

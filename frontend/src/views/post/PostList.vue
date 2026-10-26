@@ -3,21 +3,35 @@
     <el-card v-loading="loading">
       <template #header>
         <div class="card-header">
-          <span class="card-title">游记列表</span>
+          <span class="card-title">游记广场</span>
           <el-button v-if="auth.token" type="primary" @click="goCreate">发布游记</el-button>
         </div>
       </template>
-      <el-form :inline="true" :model="filters" @submit.prevent>
-        <el-form-item label="关键词">
-          <el-input v-model="filters.keyword" placeholder="搜索游记标题" clearable />
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleSearch">搜索</el-button>
-          <el-button @click="reset">重置</el-button>
-        </el-form-item>
-      </el-form>
+      <div class="toolbar">
+        <el-form :inline="true" :model="filters" @submit.prevent class="search-form">
+          <el-form-item label="关键词">
+            <el-input v-model="filters.keyword" placeholder="搜索游记标题" clearable />
+          </el-form-item>
+          <el-form-item>
+            <el-button type="primary" @click="handleSearch">搜索</el-button>
+            <el-button @click="reset">重置</el-button>
+          </el-form-item>
+        </el-form>
+        <el-radio-group v-model="sort" size="default" @change="handleSortChange">
+          <el-radio-button value="latest">最新</el-radio-button>
+          <el-radio-button value="hot">热度</el-radio-button>
+        </el-radio-group>
+      </div>
       <el-row :gutter="16">
-        <el-col v-for="post in posts" :key="post.id" :span="6" class="post-col">
+        <el-col
+          v-for="post in posts"
+          :key="post.id"
+          :xs="24"
+          :sm="12"
+          :md="8"
+          :lg="6"
+          class="post-col"
+        >
           <PostCard :post="post" @edit="handleEdit" @delete="handleDelete" />
         </el-col>
       </el-row>
@@ -52,6 +66,7 @@ const page = ref(1)
 const pageSize = ref(12)
 const loading = ref(false)
 const loaded = ref(false)
+const sort = ref('latest')
 
 const extractError = (e, fallback) => {
   if (e?.response?.status === 403) return '无权限操作'
@@ -70,7 +85,8 @@ const fetchList = async () => {
     const res = await getPostList({
       keyword: filters.keyword || undefined,
       page: page.value,
-      page_size: pageSize.value
+      page_size: pageSize.value,
+      sort: sort.value
     })
     posts.value = res.data.items || []
     total.value = res.data.total || 0
@@ -89,6 +105,11 @@ const handleSearch = () => {
 
 const reset = () => {
   filters.keyword = ''
+  page.value = 1
+  fetchList()
+}
+
+const handleSortChange = () => {
   page.value = 1
   fetchList()
 }
@@ -134,6 +155,17 @@ onMounted(() => {
 }
 .card-title {
   font-weight: 600;
+}
+.toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+.search-form {
+  margin-bottom: 0;
 }
 .post-col {
   margin-bottom: 16px;
