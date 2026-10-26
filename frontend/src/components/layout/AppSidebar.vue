@@ -7,6 +7,7 @@
       <el-menu-item index="/plan">智能路线规划</el-menu-item>
       <el-menu-item v-if="auth.token" index="/user">个人中心</el-menu-item>
       <el-menu-item v-if="auth.token" index="/user/my-plan">我的路线</el-menu-item>
+      <el-menu-item v-if="auth.token" index="/user/my-favorite">我的收藏</el-menu-item>
       <el-menu-item v-if="auth.role === 'admin'" index="/admin/post-review">内容审核</el-menu-item>
       <el-menu-item v-if="auth.role === 'admin'" index="/admin">管理员后台</el-menu-item>
       <el-menu-item v-if="!auth.token" index="/login">登录</el-menu-item>

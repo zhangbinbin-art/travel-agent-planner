@@ -24,3 +24,15 @@ class FavoriteListResponse(BaseModel):
     total: int
     page: int
     page_size: int
+
+
+class FavoriteToggleOut(BaseModel):
+    favorited: bool
+    spot_id: int
+    favorite_id: Optional[int] = None
+    message: str
+
+
+class MyFavoriteSpotsResponse(BaseModel):
+    items: List[FavoriteOut]
+    total: int

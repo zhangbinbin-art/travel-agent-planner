@@ -6,12 +6,14 @@ from datetime import datetime
 class TripGenerateRequest(BaseModel):
     spot_ids: List[int] = Field(..., min_length=2)
     start_spot_id: int
+    days: int = Field(1, ge=1, le=30)
 
 
 class TripSaveRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=150)
     spot_ids: List[int] = Field(..., min_length=2)
     start_spot_id: int
+    days: int = Field(1, ge=1, le=30)
 
 
 class RouteSpot(BaseModel):
@@ -30,10 +32,24 @@ class RouteLeg(BaseModel):
     distance: float
 
 
+class BudgetItem(BaseModel):
+    spot_id: int
+    name: str
+    ticket_price: float
+
+
+class TripBudget(BaseModel):
+    days: int
+    items: List[BudgetItem]
+    ticket_total: float
+    daily_average: float
+
+
 class TripGenerateResponse(BaseModel):
     route: List[RouteSpot]
     total_distance: float
     legs: List[RouteLeg]
+    budget: TripBudget
 
 
 class TripSummary(BaseModel):
@@ -42,6 +58,8 @@ class TripSummary(BaseModel):
     total_distance: float
     spot_count: int
     created_at: Optional[datetime] = None
+    days: int = 1
+    budget: Optional[TripBudget] = None
 
 
 class TripListResponse(BaseModel):

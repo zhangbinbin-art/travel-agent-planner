@@ -16,6 +16,7 @@ const routes = [
       { path: 'post-edit/:id', name: 'PostEdit', component: () => import('@/views/post/PostEdit.vue') },
       { path: 'user', name: 'UserCenter', component: () => import('@/views/user/UserCenter.vue') },
       { path: 'user/my-plan', name: 'MyPlan', component: () => import('@/views/user/MyPlan.vue') },
+      { path: 'user/my-favorite', name: 'MyFavorite', component: () => import('@/views/user/MyFavorite.vue') },
       { path: 'plan', name: 'Plan', component: () => import('@/views/plan/Plan.vue') },
       { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') },
       { path: 'admin/post-review', name: 'AdminPostReview', component: () => import('@/views/admin/PostReview.vue') }
@@ -35,7 +36,9 @@ router.beforeEach((to) => {
     to.path === '/post-edit' ||
     to.path.startsWith('/post-edit/') ||
     to.path === '/user/my-plan' ||
-    to.path.startsWith('/user/my-plan')
+    to.path.startsWith('/user/my-plan') ||
+    to.path === '/user/my-favorite' ||
+    to.path.startsWith('/user/my-favorite')
   if (needAuth && !localStorage.getItem('token')) {
     ElMessage.warning('请先登录')
     return { path: '/login', query: { redirect: to.fullPath } }

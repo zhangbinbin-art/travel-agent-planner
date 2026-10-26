@@ -4,9 +4,16 @@
       <template #header>
         <div style="display: flex; align-items: center; justify-content: space-between">
           <span>景点详情（ID：{{ $route.params.id }}）</span>
-          <el-button :type="isFavorited ? 'warning' : 'primary'" :loading="favoriteLoading" @click="handleFavorite">
-            {{ isFavorited ? '已收藏' : '收藏' }}
+          <el-button
+            v-if="auth.token"
+            class="favorite-btn"
+            :class="{ 'is-favorited': isFavorited }"
+            :loading="favoriteLoading"
+            @click="handleFavorite"
+          >
+            {{ isFavorited ? '♥ 已收藏' : '♡ 收藏' }}
           </el-button>
+          <span v-else class="favorite-login-hint" @click="handleFavorite">登录后可收藏</span>
         </div>
       </template>
       <el-descriptions title="基本信息" :column="2" border>
@@ -37,7 +44,7 @@ import { PieChart } from 'echarts/charts'
 import { TooltipComponent, LegendComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { getSpotDetail } from '@/api/spot'
-import { addFavorite, removeFavorite, getMyFavorites } from '@/api/favorite'
+import { toggleFavorite, getMyFavoriteSpots } from '@/api/favorite'
 import { getSpotSentiment } from '@/api/post'
 import { auth } from '@/utils/auth'
 
@@ -63,7 +70,7 @@ const tagText = computed(() => {
 const loadFavoriteState = async () => {
   if (!auth.token) return
   try {
-    const res = await getMyFavorites({ page: 1, page_size: 100 })
+    const res = await getMyFavoriteSpots()
     const items = res.data?.items || []
     isFavorited.value = items.some((it) => String(it.spot_id) === String(route.params.id))
   } catch (e) {
@@ -79,15 +86,10 @@ const handleFavorite = async () => {
   }
   favoriteLoading.value = true
   try {
-    if (isFavorited.value) {
-      await removeFavorite(route.params.id)
-      isFavorited.value = false
-      ElMessage.success('取消收藏成功')
-    } else {
-      await addFavorite(route.params.id)
-      isFavorited.value = true
-      ElMessage.success('收藏成功')
-    }
+    const res = await toggleFavorite(route.params.id)
+    const favorited = res.data?.favorited
+    isFavorited.value = typeof favorited === 'boolean' ? favorited : !isFavorited.value
+    ElMessage.success(res.data?.message || (isFavorited.value ? '收藏成功' : '取消收藏成功'))
   } catch (e) {
     if (e?.response?.status === 401) {
       ElMessage.warning('请先登录')
@@ -209,6 +211,20 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped>
+.favorite-btn.is-favorited {
+  color: #f56c6c;
+  border-color: #fbc4c4;
+  background: #fef0f0;
+}
+.favorite-login-hint {
+  color: #909399;
+  font-size: 13px;
+  cursor: pointer;
+}
+.favorite-login-hint:hover {
+  color: #409eff;
+  text-decoration: underline;
+}
 .emotion-chart {
   width: 100%;
   height: 320px;

@@ -8,15 +8,33 @@
         <el-col :xs="24" :md="8">
           <div class="panel">
             <div class="panel-title">选择景点与起点</div>
-            <div class="spot-loading" v-loading="spotsLoading">
+            <el-radio-group v-model="candidateTab" size="small" class="candidate-tabs">
+              <el-radio-button value="all">全部景点</el-radio-button>
+              <el-radio-button value="favorite">我的收藏</el-radio-button>
+            </el-radio-group>
+            <div v-if="candidateTab === 'favorite' && !auth.token" class="favorite-guest">
+              <el-empty description="请先登录后查看收藏" :image-size="80">
+                <el-button type="primary" @click="goLogin">去登录</el-button>
+              </el-empty>
+            </div>
+            <div v-else class="spot-loading" v-loading="candidateTab === 'favorite' ? favoritesLoading : spotsLoading">
               <div class="spot-count">已选择 {{ selectedSpotIds.length }} 个景点（至少选择 2 个）</div>
-              <el-checkbox-group v-model="selectedSpotIds" class="spot-group">
-                <div v-for="spot in spots" :key="spot.id" class="spot-item">
+              <el-empty
+                v-if="!displaySpots.length"
+                :description="candidateTab === 'favorite' ? '还没有收藏的景点' : '暂无可选景点'"
+                :image-size="80"
+              />
+              <el-checkbox-group v-else v-model="selectedSpotIds" class="spot-group">
+                <div v-for="spot in displaySpots" :key="spot.id" class="spot-item">
                   <el-checkbox :value="spot.id">
                     <span class="spot-label">{{ spot.name }}（{{ spot.city }}）</span>
                   </el-checkbox>
                 </div>
               </el-checkbox-group>
+            </div>
+            <div class="days-section">
+              <div class="section-label">游玩天数</div>
+              <el-input-number v-model="days" :min="1" :max="30" />
             </div>
             <el-divider />
             <div class="start-section">
@@ -44,6 +62,24 @@
               <div>途经景点数：<span class="highlight">{{ routeData.route.length }}</span></div>
               <div>起点：<span class="highlight">{{ startSpotName }}</span></div>
             </div>
+            <el-divider content-position="left">预算预估</el-divider>
+            <div v-if="routeData.budget" class="budget-card">
+              <div class="budget-head">游玩天数：<span class="highlight">{{ routeData.budget.days }}</span> 天</div>
+              <div v-for="item in (routeData.budget.items || [])" :key="item.spot_id" class="budget-row">
+                <span class="budget-name">{{ item.name }}</span>
+                <span>门票 ¥{{ formatMoney(item.ticket_price) }}</span>
+              </div>
+              <el-divider class="budget-divider" />
+              <div class="budget-row budget-total">
+                <span>门票合计</span>
+                <span>¥{{ formatMoney(routeData.budget.ticket_total) }}</span>
+              </div>
+              <div class="budget-row">
+                <span>日均预算（按 {{ routeData.budget.days }} 天）</span>
+                <span class="highlight">¥{{ formatMoney(routeData.budget.daily_average) }}</span>
+              </div>
+            </div>
+            <div v-else class="budget-empty">暂无预算信息</div>
             <el-divider content-position="left">路线顺序</el-divider>
             <el-steps direction="vertical" :active="routeData.route.length" finish-status="success">
               <el-step
@@ -77,6 +113,7 @@ import { GraphChart } from 'echarts/charts'
 import { TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import { getSpotList } from '@/api/spot'
+import { getMyFavoriteSpots } from '@/api/favorite'
 import { generateTrip, saveTrip } from '@/api/trip'
 import { auth } from '@/utils/auth'
 
@@ -87,8 +124,12 @@ echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
 
 const spots = ref([])
 const spotsLoading = ref(false)
+const favoriteSpots = ref([])
+const favoritesLoading = ref(false)
+const candidateTab = ref('all')
 const selectedSpotIds = ref([])
 const startSpotId = ref(null)
+const days = ref(2)
 
 const generating = ref(false)
 const routeData = ref(null)
@@ -110,8 +151,22 @@ const extractError = (e, fallback) => {
   return fallback
 }
 
+const displaySpots = computed(() => {
+  return candidateTab.value === 'favorite' ? favoriteSpots.value : spots.value
+})
+
+const spotMap = computed(() => {
+  const map = new Map()
+  ;[...spots.value, ...favoriteSpots.value].forEach((spot) => {
+    if (spot && spot.id !== undefined && !map.has(spot.id)) {
+      map.set(spot.id, spot)
+    }
+  })
+  return map
+})
+
 const selectedSpotsList = computed(() => {
-  return spots.value.filter((s) => selectedSpotIds.value.includes(s.id))
+  return selectedSpotIds.value.map((id) => spotMap.value.get(id)).filter(Boolean)
 })
 
 const startSpotName = computed(() => {
@@ -121,6 +176,12 @@ const startSpotName = computed(() => {
 })
 
 const formatDistance = (val) => {
+  const num = Number(val)
+  if (Number.isNaN(num)) return '0.00'
+  return num.toFixed(2)
+}
+
+const formatMoney = (val) => {
   const num = Number(val)
   if (Number.isNaN(num)) return '0.00'
   return num.toFixed(2)
@@ -151,6 +212,33 @@ const fetchSpots = async () => {
   }
 }
 
+const fetchFavoriteSpots = async () => {
+  if (!auth.token) return
+  favoritesLoading.value = true
+  try {
+    const res = await getMyFavoriteSpots()
+    favoriteSpots.value = (res.data?.items || []).map((item) => item?.spot).filter(Boolean)
+  } catch (e) {
+    if (e?.response?.status === 401) {
+      ElMessage.warning('请先登录')
+      return
+    }
+    ElMessage.error(extractError(e, '获取收藏景点失败'))
+  } finally {
+    favoritesLoading.value = false
+  }
+}
+
+const goLogin = () => {
+  router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
+}
+
+watch(candidateTab, (val) => {
+  if (val === 'favorite' && auth.token) {
+    fetchFavoriteSpots()
+  }
+})
+
 const handleGenerate = async () => {
   if (!auth.token) {
     ElMessage.warning('请先登录')
@@ -170,7 +258,8 @@ const handleGenerate = async () => {
   try {
     const res = await generateTrip({
       spot_ids: selectedSpotIds.value,
-      start_spot_id: startSpotId.value
+      start_spot_id: startSpotId.value,
+      days: days.value
     })
     routeData.value = res.data
     planName.value = ''
@@ -293,7 +382,8 @@ const handleSave = async () => {
     await saveTrip({
       name: planName.value.trim(),
       spot_ids: orderedRouteIds,
-      start_spot_id: startSpotId.value
+      start_spot_id: startSpotId.value,
+      days: days.value
     })
     ElMessage.success('保存成功')
     try {
@@ -343,9 +433,21 @@ onBeforeUnmount(() => {
   font-weight: 600;
   margin-bottom: 12px;
 }
+.candidate-tabs {
+  margin-bottom: 12px;
+}
+.favorite-guest {
+  padding: 8px 0;
+}
 .spot-count {
   color: #606266;
   margin-bottom: 10px;
+}
+.days-section {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-top: 16px;
 }
 .spot-group {
   display: flex;
@@ -385,6 +487,39 @@ onBeforeUnmount(() => {
 .highlight {
   color: #409eff;
   font-weight: 600;
+}
+.budget-card {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 12px 14px;
+  background: #fafcff;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.budget-head {
+  color: #303133;
+}
+.budget-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  color: #606266;
+}
+.budget-name {
+  color: #303133;
+}
+.budget-divider {
+  margin: 4px 0;
+}
+.budget-total {
+  color: #303133;
+  font-weight: 600;
+}
+.budget-empty {
+  color: #909399;
+  font-size: 13px;
 }
 .chart-container {
   width: 100%;

@@ -6,6 +6,9 @@
         <div class="meta">
           途经 {{ trip.spot_count }} 个景点 · 总距离 {{ formatDistance(trip.total_distance) }} km · 创建时间 {{ formatTime(trip.created_at) }}
         </div>
+        <div v-if="trip.budget" class="budget-meta">
+          门票 ¥{{ formatMoney(trip.budget.ticket_total) }} · 日均 ¥{{ formatMoney(trip.budget.daily_average) }}
+        </div>
       </div>
       <div class="actions">
         <el-button size="small" @click.stop="onView">查看详情</el-button>
@@ -26,6 +29,12 @@ const props = defineProps({
 const emit = defineEmits(['view', 'delete'])
 
 const formatDistance = (val) => {
+  const num = Number(val)
+  if (Number.isNaN(num)) return '0.00'
+  return num.toFixed(2)
+}
+
+const formatMoney = (val) => {
   const num = Number(val)
   if (Number.isNaN(num)) return '0.00'
   return num.toFixed(2)
@@ -76,6 +85,11 @@ const onDelete = () => {
   display: flex;
   flex-wrap: wrap;
   gap: 8px;
+}
+.budget-meta {
+  margin-top: 6px;
+  color: #e6a23c;
+  font-size: 13px;
 }
 .actions {
   display: flex;

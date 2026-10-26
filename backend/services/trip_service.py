@@ -6,6 +6,7 @@ from typing import List, Optional, Tuple
 
 from sqlalchemy.orm import Session
 
+from core.pricing import get_ticket_price
 from models import Spot, Trip
 from schemas.trip import RouteLeg, RouteSpot
 
@@ -174,7 +175,41 @@ def _dedupe_keep_order(values: List[int]) -> List[int]:
     return result
 
 
-def generate_route(db: Session, spot_ids: List[int], start_spot_id: int) -> dict:
+def compute_budget(route: List, days: int) -> dict:
+    """按路线顺序估算门票预算。
+
+    路线元素可以是 RouteSpot 模型，也可以是保存到 route_json 后的字典。
+    门票单价按景点名称从 core.pricing 读取，未知名称使用默认价格。
+    返回 TripBudget 字段：days / items / ticket_total / daily_average。
+    """
+    safe_days = days if days and days >= 1 else 1
+    items = []
+    for entry in route or []:
+        if isinstance(entry, dict):
+            spot_id = entry.get("id")
+            name = entry.get("name")
+        else:
+            spot_id = getattr(entry, "id", None)
+            name = getattr(entry, "name", None)
+        items.append(
+            {
+                "spot_id": spot_id,
+                "name": name or "",
+                "ticket_price": get_ticket_price(name),
+            }
+        )
+
+    ticket_total = round(sum(item["ticket_price"] for item in items), 2)
+    daily_average = round(ticket_total / safe_days, 2)
+    return {
+        "days": safe_days,
+        "items": items,
+        "ticket_total": ticket_total,
+        "daily_average": daily_average,
+    }
+
+
+def generate_route(db: Session, spot_ids: List[int], start_spot_id: int, days: int = 1) -> dict:
     """根据用户选择的景点生成一条游览路线。
 
     思路：
@@ -274,24 +309,29 @@ def generate_route(db: Session, spot_ids: List[int], start_spot_id: int) -> dict
 
     total_distance = round(sum(leg.distance for leg in legs), 2)
 
+    safe_days = days if days and days >= 1 else 1
     return {
         "spot_ids": walk_order,
         "route": route,
         "legs": legs,
         "total_distance": total_distance,
         "start_spot_id": start,
+        "days": safe_days,
+        "budget": compute_budget(route, safe_days),
     }
 
 
-def save_trip(db: Session, user_id: int, name: str, spot_ids: List[int], start_spot_id: int) -> Trip:
+def save_trip(db: Session, user_id: int, name: str, spot_ids: List[int], start_spot_id: int, days: int = 1) -> Trip:
     """保存路线：始终服务端重算，绝不信任客户端传来的路线结果。"""
-    result = generate_route(db, spot_ids, start_spot_id)
+    result = generate_route(db, spot_ids, start_spot_id, days)
 
     payload = {
         "spot_ids": result["spot_ids"],
         "start_spot_id": result["start_spot_id"],
         "route": [item.model_dump() for item in result["route"]],
         "legs": [leg.model_dump() for leg in result["legs"]],
+        "days": result["days"],
+        "budget": result["budget"],
     }
 
     trip = Trip(
@@ -339,13 +379,18 @@ def get_my_trips(db: Session, user_id: int, page: int, page_size: int) -> dict:
     items = []
     for trip in trips:
         route_data = parse_route(trip)
+        route = route_data.get("route") or []
+        days = route_data.get("days") or 1
+        budget = route_data.get("budget") or compute_budget(route, days)
         items.append(
             {
                 "id": trip.id,
                 "name": trip.name,
                 "total_distance": trip.total_distance or 0,
-                "spot_count": len(route_data.get("route") or []),
+                "spot_count": len(route),
                 "created_at": trip.created_at,
+                "days": days,
+                "budget": budget,
             }
         )
 
@@ -366,6 +411,8 @@ def build_detail(trip: Trip) -> dict:
     """把 Trip ORM 对象组装成 TripDetail 形状的字典。"""
     route_data = parse_route(trip)
     route = route_data.get("route") or []
+    days = route_data.get("days") or 1
+    budget = route_data.get("budget") or compute_budget(route, days)
     return {
         "id": trip.id,
         "name": trip.name,
@@ -376,4 +423,6 @@ def build_detail(trip: Trip) -> dict:
         "route": route,
         "legs": route_data.get("legs") or [],
         "start_spot_id": route_data.get("start_spot_id"),
+        "days": days,
+        "budget": budget,
     }

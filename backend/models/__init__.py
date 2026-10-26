@@ -81,6 +81,7 @@ class Favorite(Base):
     spot_id = Column(Integer, ForeignKey("spots.id"))
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     spot = relationship("Spot")
+    __table_args__ = (UniqueConstraint("user_id", "spot_id", name="uq_favorite_user_spot"),)
 
 class Trip(Base):
     __tablename__ = "trips"
