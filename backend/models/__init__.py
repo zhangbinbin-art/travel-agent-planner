@@ -22,8 +22,9 @@ class Spot(Base):
     tags = Column(String(255))
     description = Column(Text)
     score = Column(Float, default=0)
-    lat = Column(Float, nullable=True)
-    lng = Column(Float, nullable=True)
+    # 经纬度用双精度：MySQL 下 Float 为 4 字节单精度，会丢失 1e-4 量级（约 10m）
+    lat = Column(Float(53), nullable=True)
+    lng = Column(Float(53), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 
