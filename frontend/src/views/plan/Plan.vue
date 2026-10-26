@@ -1,50 +1,402 @@
 <template>
   <div class="plan">
     <el-card>
-      <template #header>智能路线规划</template>
-      <el-form :model="form" label-width="100px">
-        <el-form-item label="选择景点">
-          <el-checkbox-group v-model="form.spots">
-            <el-checkbox label="西湖景区" />
-            <el-checkbox label="故宫博物院" />
-            <el-checkbox label="外滩" />
-            <el-checkbox label="灵隐寺" />
-          </el-checkbox-group>
-        </el-form-item>
-        <el-form-item label="游玩天数">
-          <el-input-number v-model="form.days" :min="1" :max="7" />
-        </el-form-item>
-        <el-form-item label="游玩时长">
-          <el-input-number v-model="form.hours" :min="2" :max="12" />
-        </el-form-item>
-        <el-form-item label="偏好权重">
-          <el-slider v-model="form.weight" show-input :min="0" :max="100" />
-          <div class="hint">预留偏好权重设置（个性化）</div>
-        </el-form-item>
-        <el-form-item>
-          <el-button type="primary">生成路线（预览）</el-button>
-        </el-form-item>
-      </el-form>
-      <el-divider>路线预览</el-divider>
-      <el-empty description="生成路线后展示路线表（骨架）" />
+      <template #header>
+        <span class="card-title">智能路线规划</span>
+      </template>
+      <el-row :gutter="16">
+        <el-col :xs="24" :md="8">
+          <div class="panel">
+            <div class="panel-title">选择景点与起点</div>
+            <div class="spot-loading" v-loading="spotsLoading">
+              <div class="spot-count">已选择 {{ selectedSpotIds.length }} 个景点（至少选择 2 个）</div>
+              <el-checkbox-group v-model="selectedSpotIds" class="spot-group">
+                <div v-for="spot in spots" :key="spot.id" class="spot-item">
+                  <el-checkbox :value="spot.id">
+                    <span class="spot-label">{{ spot.name }}（{{ spot.city }}）</span>
+                  </el-checkbox>
+                </div>
+              </el-checkbox-group>
+            </div>
+            <el-divider />
+            <div class="start-section">
+              <div class="section-label">起点景点</div>
+              <el-select v-model="startSpotId" placeholder="请选择起点景点" clearable class="start-select">
+                <el-option
+                  v-for="spot in selectedSpotsList"
+                  :key="spot.id"
+                  :label="spot.name + '（' + spot.city + '）'"
+                  :value="spot.id"
+                />
+              </el-select>
+            </div>
+            <div class="actions">
+              <el-button type="primary" :loading="generating" @click="handleGenerate">生成路线</el-button>
+              <el-button @click="handleReset">重置</el-button>
+            </div>
+          </div>
+        </el-col>
+        <el-col :xs="24" :md="16">
+          <div class="panel" v-if="routeData">
+            <div class="panel-title">路线结果</div>
+            <div class="summary">
+              <div>总距离：<span class="highlight">{{ formatDistance(routeData.total_distance) }} km</span></div>
+              <div>途经景点数：<span class="highlight">{{ routeData.route.length }}</span></div>
+              <div>起点：<span class="highlight">{{ startSpotName }}</span></div>
+            </div>
+            <el-divider content-position="left">路线顺序</el-divider>
+            <el-steps direction="vertical" :active="routeData.route.length" finish-status="success">
+              <el-step
+                v-for="(spot, idx) in routeData.route"
+                :key="spot.id"
+                :title="(idx + 1) + '. ' + spot.name + '（' + spot.city + '）'"
+                :description="'评分：' + spot.score"
+              />
+            </el-steps>
+            <el-divider content-position="left">路线图</el-divider>
+            <div ref="chartRef" class="chart-container"></div>
+            <el-divider content-position="left">保存方案</el-divider>
+            <div class="save-row">
+              <el-input v-model="planName" placeholder="给这条路线起个名字" class="plan-name-input" />
+              <el-button type="primary" :loading="saving" :disabled="!routeData" @click="handleSave">保存方案</el-button>
+            </div>
+          </div>
+          <el-empty v-else description="请在左侧选择景点并生成路线" />
+        </el-col>
+      </el-row>
     </el-card>
   </div>
 </template>
 
 <script setup>
-import { reactive } from 'vue'
-const form = reactive({
-  spots: [],
-  days: 1,
-  hours: 4,
-  weight: 50
+import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
+import { useRouter } from 'vue-router'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import * as echarts from 'echarts/core'
+import { GraphChart } from 'echarts/charts'
+import { TooltipComponent } from 'echarts/components'
+import { CanvasRenderer } from 'echarts/renderers'
+import { getSpotList } from '@/api/spot'
+import { generateTrip, saveTrip } from '@/api/trip'
+import { auth } from '@/utils/auth'
+
+const router = useRouter()
+
+// 按需注册 ECharts 模块，避免整包引入导致 Plan 页 chunk 过大
+echarts.use([GraphChart, TooltipComponent, CanvasRenderer])
+
+const spots = ref([])
+const spotsLoading = ref(false)
+const selectedSpotIds = ref([])
+const startSpotId = ref(null)
+
+const generating = ref(false)
+const routeData = ref(null)
+const planName = ref('')
+const saving = ref(false)
+
+const chartRef = ref(null)
+let chartInstance = null
+let resizeHandler = null
+
+const extractError = (e, fallback) => {
+  if (e?.response?.status === 403) return '无权限操作'
+  const detail = e?.response?.data?.detail
+  if (typeof detail === 'string' && detail) return detail
+  if (Array.isArray(detail)) {
+    const messages = detail.map((item) => item?.msg || item?.message).filter(Boolean)
+    if (messages.length) return messages.join('；')
+  }
+  return fallback
+}
+
+const selectedSpotsList = computed(() => {
+  return spots.value.filter((s) => selectedSpotIds.value.includes(s.id))
+})
+
+const startSpotName = computed(() => {
+  if (!routeData.value || !routeData.value.route.length) return ''
+  const start = routeData.value.route.find((s) => s.id === startSpotId.value) || routeData.value.route[0]
+  return start ? start.name : ''
+})
+
+const formatDistance = (val) => {
+  const num = Number(val)
+  if (Number.isNaN(num)) return '0.00'
+  return num.toFixed(2)
+}
+
+watch(selectedSpotIds, (newVal) => {
+  if (!newVal || newVal.length === 0) {
+    startSpotId.value = null
+    return
+  }
+  if (startSpotId.value && !newVal.includes(startSpotId.value)) {
+    startSpotId.value = null
+  }
+  if (!startSpotId.value) {
+    startSpotId.value = newVal[0]
+  }
+})
+
+const fetchSpots = async () => {
+  spotsLoading.value = true
+  try {
+    const res = await getSpotList({ page: 1, page_size: 100 })
+    spots.value = res.data.items || []
+  } catch (e) {
+    ElMessage.error(extractError(e, '获取景点列表失败'))
+  } finally {
+    spotsLoading.value = false
+  }
+}
+
+const handleGenerate = async () => {
+  if (!auth.token) {
+    ElMessage.warning('请先登录')
+    router.push('/login')
+    return
+  }
+  if (selectedSpotIds.value.length < 2) {
+    ElMessage.warning('请至少选择两个景点')
+    return
+  }
+  if (!startSpotId.value) {
+    ElMessage.warning('请选择起点景点')
+    return
+  }
+  generating.value = true
+  routeData.value = null
+  try {
+    const res = await generateTrip({
+      spot_ids: selectedSpotIds.value,
+      start_spot_id: startSpotId.value
+    })
+    routeData.value = res.data
+    planName.value = ''
+    await nextTick()
+    initChart()
+  } catch (e) {
+    ElMessage.error(extractError(e, '生成路线失败'))
+  } finally {
+    generating.value = false
+  }
+}
+
+const handleReset = () => {
+  selectedSpotIds.value = []
+  startSpotId.value = null
+  routeData.value = null
+  planName.value = ''
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+}
+
+const initChart = () => {
+  if (!chartRef.value || !routeData.value) return
+  if (chartInstance) {
+    chartInstance.dispose()
+  }
+  chartInstance = echarts.init(chartRef.value)
+  const route = routeData.value.route || []
+  const legs = routeData.value.legs || []
+  const nodes = route.map((spot) => ({
+    name: String(spot.id),
+    value: spot.name,
+    x: spot.x,
+    y: spot.y,
+    symbolSize: spot.id === startSpotId.value ? 18 : 14,
+    itemStyle: {
+      color: spot.id === startSpotId.value ? '#409eff' : '#67c23a'
+    },
+    label: {
+      show: true,
+      formatter: spot.name,
+      position: 'right'
+    }
+  }))
+  const links = legs.map((leg) => ({
+    source: String(leg.from_spot_id),
+    target: String(leg.to_spot_id)
+  }))
+  const option = {
+    tooltip: {
+      formatter: (params) => {
+        if (params.dataType === 'node') {
+          const spot = route.find((s) => String(s.id) === params.name)
+          if (spot) {
+            return spot.name + '（' + spot.city + '）<br/>评分：' + spot.score
+          }
+          return params.value
+        }
+        if (params.dataType === 'edge') {
+          const from = route.find((s) => String(s.id) === params.data.source)
+          const to = route.find((s) => String(s.id) === params.data.target)
+          const leg = legs.find((l) => String(l.from_spot_id) === params.data.source && String(l.to_spot_id) === params.data.target)
+          if (from && to) {
+            return from.name + ' -> ' + to.name + '<br/>距离：' + (leg ? Number(leg.distance).toFixed(2) : '') + ' km'
+          }
+        }
+        return ''
+      }
+    },
+    xAxis: { show: false, type: 'value' },
+    yAxis: { show: false, type: 'value' },
+    series: [
+      {
+        type: 'graph',
+        layout: 'none',
+        data: nodes,
+        links: links,
+        roam: true,
+        label: {
+          show: true
+        },
+        lineStyle: {
+          color: '#909399',
+          curveness: 0.1,
+          width: 2
+        },
+        edgeSymbol: ['none', 'arrow'],
+        edgeSymbolSize: [0, 10]
+      }
+    ]
+  }
+  chartInstance.setOption(option)
+  if (!resizeHandler) {
+    resizeHandler = () => {
+      if (chartInstance) chartInstance.resize()
+    }
+    window.addEventListener('resize', resizeHandler)
+  }
+}
+
+const handleSave = async () => {
+  if (!auth.token) {
+    ElMessage.warning('请先登录')
+    router.push('/login')
+    return
+  }
+  if (!routeData.value) {
+    ElMessage.warning('请先生成路线')
+    return
+  }
+  if (!planName.value || !planName.value.trim()) {
+    ElMessage.warning('请输入路线名称')
+    return
+  }
+  saving.value = true
+  try {
+    const orderedRouteIds = routeData.value.route.map((s) => s.id)
+    await saveTrip({
+      name: planName.value.trim(),
+      spot_ids: orderedRouteIds,
+      start_spot_id: startSpotId.value
+    })
+    ElMessage.success('保存成功')
+    try {
+      await ElMessageBox.confirm('是否前往“我的路线”查看？', '提示', {
+        confirmButtonText: '去查看',
+        cancelButtonText: '留在此页',
+        type: 'success'
+      })
+      router.push('/user/my-plan')
+    } catch (e) {
+      // user chose to stay
+    }
+  } catch (e) {
+    ElMessage.error(extractError(e, '保存失败'))
+  } finally {
+    saving.value = false
+  }
+}
+
+onMounted(() => {
+  fetchSpots()
+})
+
+onBeforeUnmount(() => {
+  if (chartInstance) {
+    chartInstance.dispose()
+    chartInstance = null
+  }
+  if (resizeHandler) {
+    window.removeEventListener('resize', resizeHandler)
+    resizeHandler = null
+  }
 })
 </script>
 
 <style scoped>
-.hint {
-  color: #909399;
-  font-size: 13px;
-  margin-top: 6px;
+.card-title {
+  font-weight: 600;
+}
+.panel {
+  border: 1px solid #ebeef5;
+  border-radius: 6px;
+  padding: 16px;
+  min-height: 400px;
+}
+.panel-title {
+  font-weight: 600;
+  margin-bottom: 12px;
+}
+.spot-count {
+  color: #606266;
+  margin-bottom: 10px;
+}
+.spot-group {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  max-height: 260px;
+  overflow: auto;
+}
+.spot-item {
+  display: flex;
+}
+.spot-label {
+  color: #303133;
+}
+.start-section {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.section-label {
+  color: #606266;
+}
+.start-select {
+  width: 100%;
+}
+.actions {
+  display: flex;
+  gap: 10px;
+  margin-top: 16px;
+}
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 16px;
+  color: #606266;
+}
+.highlight {
+  color: #409eff;
+  font-weight: 600;
+}
+.chart-container {
+  width: 100%;
+  height: 380px;
+}
+.save-row {
+  display: flex;
+  gap: 12px;
+  align-items: center;
+}
+.plan-name-input {
+  flex: 1;
+  max-width: 320px;
 }
 </style>

@@ -55,8 +55,8 @@ class Trip(Base):
     __tablename__ = "trips"
     id = Column(Integer, primary_key=True, index=True)
     user_id = Column(Integer, ForeignKey("users.id"))
-    title = Column(String(150))
-    plan_data = Column(Text)  # JSON string
-    days = Column(Integer, default=1)
+    name = Column(String(150), nullable=False)
+    route_json = Column(Text)  # JSON string: {"spot_ids": [...], "start_spot_id": n, "route": [...], "legs": [...]}
+    total_distance = Column(Float, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     author = relationship("User")
