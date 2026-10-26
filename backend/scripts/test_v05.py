@@ -32,7 +32,7 @@ print("=== 2. normal user ===")
 r = c.post("/api/v1/post", json={"title": "v05 test post", "content": "hello\nworld"}, headers=h(ut))
 print("create", r.status_code)
 pid = r.json()["id"]
-r = c.get(f"/api/v1/post/{pid}")
+r = c.get(f"/api/v1/post/{pid}", headers=h(ut))
 print("detail", r.status_code, "author", r.json()["author"]["username"], "comments", len(r.json()["comments"]))
 r = c.get("/api/v1/post/list", params={"keyword": "v05"})
 print("search", r.status_code, r.json()["total"])
@@ -42,6 +42,9 @@ r = c.put(f"/api/v1/post/{pid}", json={"title": "v05 edited by admin"}, headers=
 print("admin update", r.status_code, r.json().get("title"))
 
 print("=== 3. comments ===")
+# v0.7 审核流：新建/普通用户编辑后 status=0，未通过审核不允许评论与游客查看，先由管理员审核通过
+r = c.put(f"/api/v1/admin/post/{pid}/review", json={"status": 1}, headers=h(at))
+print("admin approve", r.status_code, r.json().get("status"))
 r = c.post("/api/v1/comment", params={"post_id": pid}, json={"content": "admin comment", "score": 4}, headers=h(at))
 print("admin comment", r.status_code, r.json().get("author", {}).get("username"))
 cid_admin = r.json()["id"]
@@ -77,6 +80,6 @@ for i in range(3):
 r = c.get("/api/v1/post/list", params={"page": 1, "page_size": 2})
 print(r.status_code, r.json()["page"], r.json()["page_size"], len(r.json()["items"]), r.json()["total"])
 
-for p in c.get("/api/v1/post/list", params={"keyword": "page test", "page_size": 50}).json()["items"]:
+for p in c.get("/api/v1/admin/post/list", params={"keyword": "page test", "page_size": 50}, headers=h(at)).json()["items"]:
     c.delete(f"/api/v1/post/{p['id']}", headers=h(ut))
 print("cleanup done")
