@@ -64,7 +64,7 @@ const loadFavoriteState = async () => {
 const handleFavorite = async () => {
   if (!auth.token) {
     ElMessage.warning('请先登录')
-    router.push('/login')
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
     return
   }
   favoriteLoading.value = true
@@ -81,7 +81,7 @@ const handleFavorite = async () => {
   } catch (e) {
     if (e?.response?.status === 401) {
       ElMessage.warning('请先登录')
-      router.push('/login')
+      router.push({ path: '/login', query: { redirect: route.fullPath } })
       return
     }
     ElMessage.error(e?.response?.data?.detail || '操作失败')

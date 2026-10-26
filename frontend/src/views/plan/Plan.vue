@@ -154,7 +154,7 @@ const fetchSpots = async () => {
 const handleGenerate = async () => {
   if (!auth.token) {
     ElMessage.warning('请先登录')
-    router.push('/login')
+    router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
     return
   }
   if (selectedSpotIds.value.length < 2) {
@@ -276,7 +276,7 @@ const initChart = () => {
 const handleSave = async () => {
   if (!auth.token) {
     ElMessage.warning('请先登录')
-    router.push('/login')
+    router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
     return
   }
   if (!routeData.value) {

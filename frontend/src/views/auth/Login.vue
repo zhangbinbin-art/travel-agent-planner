@@ -20,23 +20,47 @@
 
 <script setup>
 import { reactive } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 import { setAuth } from '@/utils/auth'
 
+const route = useRoute()
 const router = useRouter()
 const form = reactive({
   username: '',
   password: ''
 })
 
+// 只允许跳转本站内部路由，防止 ?redirect=https://evil.com 之类的开放重定向
+const resolveRedirect = () => {
+  const raw = route.query.redirect
+  // 重复 query 参数会解析成数组，非字符串一律视为非法
+  if (typeof raw !== 'string') return '/'
+  const target = raw.trim()
+  if (!target || !target.startsWith('/')) return '/'
+  // 协议相对地址（//evil.com）与反斜杠（浏览器会当成 //）都不是站内路径
+  if (target.startsWith('//') || target.includes('\\')) return '/'
+
+  let url
+  try {
+    url = new URL(target, window.location.origin)
+  } catch (e) {
+    return '/'
+  }
+  // 同源白名单：只有本站路由才允许跳转
+  if (url.origin !== window.location.origin) return '/'
+  // 避免登录后再次跳回登录页造成循环
+  if (url.pathname === '/login') return '/'
+  return url.pathname + url.search + url.hash
+}
+
 const handleLogin = async () => {
   try {
     const res = await api.post('/api/v1/user/login', form)
     setAuth(res.data.access_token, form.username)
     ElMessage.success('登录成功')
-    router.push('/')
+    router.push(resolveRedirect())
   } catch (e) {
     if (e?.response?.status === 401) {
       ElMessage.error('账号或密码错误')

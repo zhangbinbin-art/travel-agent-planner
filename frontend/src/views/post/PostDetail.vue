@@ -118,7 +118,7 @@ const extractError = (e, fallback) => {
 
 const promptLogin = () => {
   ElMessage.warning('请先登录')
-  router.push('/login')
+  router.push({ path: '/login', query: { redirect: route.fullPath } })
 }
 
 const fetchDetail = async () => {

@@ -24,8 +24,9 @@ api.interceptors.response.use(
   (error) => {
     if (error?.response?.status === 401) {
       clearAuth()
-      if (router.currentRoute.value.path !== '/login') {
-        router.push('/login')
+      const current = router.currentRoute.value
+      if (current.path !== '/login') {
+        router.push({ path: '/login', query: { redirect: current.fullPath } })
       }
     }
     return Promise.reject(error)
