@@ -1,28 +1,84 @@
 <template>
   <div class="home-fliggy">
     <div class="home-layout">
-      <!-- 左侧折叠筛选面板（负一屏） -->
-      <FilterPanel
-        :open="isFilterOpen"
-        :active-dest="activeDest"
-        :active-themes="activeThemes"
-        :active-spot="activeSpotName"
-        :cities="cityOptions"
-        @toggle="isFilterOpen = !isFilterOpen"
-        @select-dest="setDest"
-        @toggle-theme="toggleTheme"
-        @select-hot="setHotTag"
-        @recommend="handleRecommend"
-      />
-
-      <!-- 右侧主内容 -->
       <main class="main-content">
         <!-- 轮播图 -->
-        <el-carousel height="220px" class="banner" indicator-position="outside">
+        <el-carousel height="240px" class="banner" indicator-position="outside">
           <el-carousel-item v-for="(img, idx) in banners" :key="idx">
             <img :src="img" class="banner-img" alt="风景" />
           </el-carousel-item>
         </el-carousel>
+
+        <!-- 通栏筛选区（Banner 下方） -->
+        <section class="filter-section">
+          <div class="filter-section-head">
+            <span class="filter-section-title">筛选</span>
+          </div>
+
+          <div class="filter-row">
+            <span class="filter-row-label">热门目的地</span>
+            <div class="filter-row-content">
+              <el-tag
+                v-for="item in hotDest"
+                :key="item"
+                :type="activeDest === item ? 'primary' : 'info'"
+                :effect="activeDest === item ? 'dark' : 'plain'"
+                class="filter-tag"
+                @click="setDest(item)"
+              >
+                {{ item }}
+              </el-tag>
+              <el-tag
+                v-if="activeDest && !hotDest.includes(activeDest)"
+                type="primary"
+                effect="dark"
+                class="filter-tag"
+                @click="setDest(activeDest)"
+              >
+                {{ activeDest }} ×
+              </el-tag>
+              <el-button link type="primary" size="small" @click="openCityDialog">
+                查看全部地区
+              </el-button>
+            </div>
+          </div>
+
+          <div class="filter-row">
+            <span class="filter-row-label">旅游主题</span>
+            <div class="filter-row-content">
+              <el-tag
+                v-for="item in themes"
+                :key="item"
+                :type="activeThemes.includes(item) ? 'primary' : 'info'"
+                :effect="activeThemes.includes(item) ? 'dark' : 'plain'"
+                class="filter-tag"
+                @click="toggleTheme(item)"
+              >
+                {{ item }}
+              </el-tag>
+            </div>
+          </div>
+
+          <div class="filter-row">
+            <span class="filter-row-label">热门景点</span>
+            <div class="filter-row-content">
+              <el-tag
+                v-for="item in hotSpotTags"
+                :key="item"
+                :type="activeSpotName === item ? 'primary' : 'info'"
+                :effect="activeSpotName === item ? 'dark' : 'plain'"
+                class="filter-tag"
+                @click="setHotTag(item)"
+              >
+                {{ item }}
+              </el-tag>
+            </div>
+          </div>
+
+          <div class="filter-section-actions">
+            <el-button type="primary" @click="handleRecommend">推荐发现</el-button>
+          </div>
+        </section>
 
         <!-- Tab 切换 -->
         <div class="tab-bar">
@@ -146,6 +202,23 @@
         </section>
       </main>
     </div>
+
+    <el-dialog v-model="cityDialogVisible" title="选择目的地" width="520px" append-to-body>
+      <el-input v-model="cityKeyword" placeholder="搜索城市" clearable class="city-search" />
+      <div class="city-list">
+        <el-tag
+          v-for="city in filteredCities"
+          :key="city"
+          :type="activeDest === city ? 'primary' : 'info'"
+          :effect="activeDest === city ? 'dark' : 'plain'"
+          class="city-tag"
+          @click="pickCity(city)"
+        >
+          {{ city }}
+        </el-tag>
+      </div>
+      <el-empty v-if="!filteredCities.length" description="没有匹配的城市" :image-size="80" />
+    </el-dialog>
   </div>
 </template>
 
@@ -153,11 +226,16 @@
 import { ref, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import api from '@/api'
-import FilterPanel from '@/components/home/FilterPanel.vue'
 
 const router = useRouter()
 
-const isFilterOpen = ref(true)
+const hotDest = ['北京', '上海', '杭州', '广州', '桂林', '厦门']
+const themes = ['自然风景', '历史古迹', '城市观光', '主题乐园']
+const hotSpotTags = ['西湖景区', '故宫博物院', '外滩']
+
+const cityDialogVisible = ref(false)
+const cityKeyword = ref('')
+
 const activeTab = ref('recommend')
 const activeDest = ref('')
 const activeThemes = ref([])
@@ -195,6 +273,23 @@ const cityOptions = computed(() => {
   })
   return Array.from(set)
 })
+
+const filteredCities = computed(() => {
+  const list = [...cityOptions.value].sort((a, b) => String(a).localeCompare(String(b), 'zh-CN'))
+  const kw = cityKeyword.value.trim().toLowerCase()
+  if (!kw) return list
+  return list.filter((c) => String(c).toLowerCase().includes(kw))
+})
+
+const openCityDialog = () => {
+  cityKeyword.value = ''
+  cityDialogVisible.value = true
+}
+
+const pickCity = (city) => {
+  setDest(city)
+  cityDialogVisible.value = false
+}
 
 const filteredSpots = computed(() => {
   let list = allSpots.value.slice()
@@ -278,6 +373,67 @@ const goDetail = (id) => {
   border-radius: 8px;
   overflow: hidden;
   margin-bottom: 16px;
+}
+.filter-section {
+  background: #fff;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  padding: 16px 18px;
+  margin-bottom: 16px;
+}
+.filter-section-head {
+  margin-bottom: 8px;
+}
+.filter-section-title {
+  font-size: 18px;
+  font-weight: 600;
+  color: #303133;
+}
+.filter-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 10px 0;
+  border-top: 1px dashed #f0f0f0;
+}
+.filter-row:first-of-type {
+  border-top: none;
+}
+.filter-row-label {
+  width: 84px;
+  flex-shrink: 0;
+  color: #606266;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 24px;
+}
+.filter-row-content {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+.filter-tag {
+  cursor: pointer;
+  border-radius: 4px;
+}
+.filter-section-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.city-search {
+  margin-bottom: 12px;
+}
+.city-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  max-height: 300px;
+  overflow: auto;
+}
+.city-tag {
+  cursor: pointer;
 }
 .banner-img {
   width: 100%;
