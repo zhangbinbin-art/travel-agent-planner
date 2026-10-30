@@ -57,6 +57,7 @@
                 :require-city="true"
                 :allow-custom="true"
                 :reset-signal="hotelResetSignal"
+                :filter-seed="hotelFilterSeed"
                 @change="onHotelChange"
                 @filters-change="hotelFilters = $event"
               />
@@ -275,8 +276,6 @@ defineOptions({ name: 'Plan' })
 const router = useRouter()
 
 const PLAN_CACHE_KEY = 'last_trip_plan'
-// 离开本页时是否前往详情页（用于 KeepAlive 返回恢复判断）
-let leftToDetail = false
 
 // 按需注册 ECharts 模块，避免整包引入导致 Plan 页 chunk 过大
 echarts.use([GraphChart, GridComponent, TooltipComponent, CanvasRenderer])
@@ -305,6 +304,8 @@ const defaultHotelFilters = () => ({
 })
 const hotelFilters = ref(defaultHotelFilters())
 const hotelResetSignal = ref(0)
+// 回退恢复时把筛选条件一次性同步给酒店筛选组件（避免双向循环）
+const hotelFilterSeed = ref(null)
 const hotelPerDay = ref(300)
 const selectedHotelId = ref('')
 const selectedHotel = ref(null)
@@ -617,6 +618,10 @@ const restorePlanCache = () => {
     preferences.value = data.preferences || []
     days.value = data.days || 2
     hotelFilters.value = data.hotelFilters || defaultHotelFilters()
+    hotelFilterSeed.value = {
+      ...hotelFilters.value,
+      _ts: Date.now()
+    }
     hotelPerDay.value = data.hotelPerDay ?? 300
     selectedHotelId.value = data.selectedHotelId ?? ''
     selectedHotel.value = data.selectedHotel || null
@@ -706,6 +711,7 @@ const resetAll = (clearCache = false) => {
   preferences.value = []
   days.value = 2
   hotelFilters.value = defaultHotelFilters()
+  hotelFilterSeed.value = null
   hotelResetSignal.value += 1
   hotelPerDay.value = 300
   selectedHotelId.value = ''
@@ -951,28 +957,28 @@ const handleSave = async () => {
 
 // 路线图只画景点，手动切换酒店无需重绘地图（列表与预算由 timeline/refreshBudgetHotel 更新）
 
-onBeforeRouteLeave((to) => {
-  leftToDetail = to.name === 'SpotDetail' || to.name === 'HotelDetail'
-  if (leftToDetail && routeData.value) {
-    savePlanCache()
-  }
+// 离开规划页（详情页 / 实名页 / 支付页 / 其他）都写入缓存，保证浏览器回退可恢复
+onBeforeRouteLeave(() => {
+  savePlanCache()
 })
 
 onMounted(() => {})
 
 onActivated(() => {
-  if (leftToDetail) {
-    leftToDetail = false
-    // 会话兜底：组件状态意外丢失时从 sessionStorage 恢复
-    if (!routeData.value && restorePlanCache()) {
-      nextTick(() => initChart())
-    } else if (routeData.value) {
-      nextTick(() => initChart())
-    }
-    return
+  // 返回规划页时优先读取缓存回填，不自动清空表单
+  if (restorePlanCache()) {
+    nextTick(() => {
+      if (routeData.value) {
+        try {
+          initChart()
+        } catch (e) {
+          console.warn('[Plan] 恢复路线图失败:', e?.message)
+        }
+      }
+    })
+  } else if (routeData.value) {
+    nextTick(() => initChart())
   }
-  // 从导航菜单或地址栏直接进入：全新初始化，不加载旧缓存
-  resetAll(true)
 })
 
 onBeforeUnmount(() => {

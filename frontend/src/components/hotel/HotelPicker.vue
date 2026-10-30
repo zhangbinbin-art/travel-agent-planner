@@ -56,7 +56,9 @@ const props = defineProps({
   cityList: { type: Array, default: undefined },
   allowCustom: { type: Boolean, default: true },
   // 父组件递增该值可重置筛选条件（用于“重置”按钮）
-  resetSignal: { type: Number, default: 0 }
+  resetSignal: { type: Number, default: 0 },
+  // 父组件一次性下发筛选条件（用于 keep-alive/sessionStorage 回退恢复）
+  filterSeed: { type: Object, default: null }
 })
 const emit = defineEmits(['update:modelValue', 'change', 'filters-change'])
 
@@ -166,6 +168,19 @@ watch(
     emit('filters-change', defaultFilters())
     emit('update:modelValue', '')
     emit('change', null)
+  }
+)
+watch(
+  () => props.filterSeed,
+  (seed) => {
+    if (!seed) return
+    filters.value = {
+      types: [...(seed.types || [])],
+      price: [...(seed.price || [0, 2000])],
+      minEnv: seed.minEnv || 0,
+      minService: seed.minService || 0,
+      features: [...(seed.features || [])]
+    }
   }
 )
 // 城市酒店池不变，筛选条件变化只做前端二次过滤
