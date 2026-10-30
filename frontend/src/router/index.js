@@ -1,6 +1,7 @@
 import { createRouter, createWebHistory } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import AppLayout from '@/components/layout/AppLayout.vue'
+import { clearAuth } from '@/utils/auth'
 
 const routes = [
   {
@@ -8,8 +9,8 @@ const routes = [
     component: AppLayout,
     children: [
       { path: '', name: 'Home', component: () => import('@/views/home/Home.vue') },
-      { path: 'spot-list', name: 'SpotList', component: () => import('@/views/spot/SpotList.vue') },
       { path: 'spot-detail/:id', name: 'SpotDetail', component: () => import('@/views/spot/SpotDetail.vue') },
+      { path: 'hotel-detail/:id', name: 'HotelDetail', component: () => import('@/views/hotel/HotelDetail.vue') },
       { path: 'post-list', name: 'PostList', component: () => import('@/views/post/PostList.vue') },
       { path: 'post-detail/:id', name: 'PostDetail', component: () => import('@/views/post/PostDetail.vue') },
       { path: 'post-edit', name: 'PostCreate', component: () => import('@/views/post/PostEdit.vue') },
@@ -17,9 +18,22 @@ const routes = [
       { path: 'user', name: 'UserCenter', component: () => import('@/views/user/UserCenter.vue') },
       { path: 'user/my-plan', name: 'MyPlan', component: () => import('@/views/user/MyPlan.vue') },
       { path: 'user/my-favorite', name: 'MyFavorite', component: () => import('@/views/user/MyFavorite.vue') },
+      { path: 'user/my-booking', name: 'MyBooking', component: () => import('@/views/user/MyBooking.vue') },
       { path: 'plan', name: 'Plan', component: () => import('@/views/plan/Plan.vue') },
       { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') },
-      { path: 'admin/post-review', name: 'AdminPostReview', component: () => import('@/views/admin/PostReview.vue') }
+      { path: 'admin/post-review', name: 'AdminPostReview', component: () => import('@/views/admin/PostReview.vue') },
+      { path: 'admin/merchant', name: 'AdminMerchantAudit', component: () => import('@/views/admin/MerchantAudit.vue') },
+      { path: 'admin/data', name: 'AdminPlatformData', component: () => import('@/views/admin/PlatformData.vue') }
+    ]
+  },
+  {
+    path: '/merchant',
+    component: () => import('@/components/layout/MerchantLayout.vue'),
+    children: [
+      { path: '', redirect: '/merchant/dashboard' },
+      { path: 'dashboard', name: 'MerchantDashboard', component: () => import('@/views/merchant/MerchantDashboard.vue') },
+      { path: 'hotel-manage', name: 'MerchantHotelManage', component: () => import('@/views/merchant/MerchantHotelManage.vue') },
+      { path: 'booking-list', name: 'MerchantBookingList', component: () => import('@/views/merchant/MerchantBookingList.vue') }
     ]
   },
   { path: '/login', name: 'Login', component: () => import('@/views/auth/Login.vue') },
@@ -32,16 +46,62 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  const needAuth =
-    to.path === '/post-edit' ||
-    to.path.startsWith('/post-edit/') ||
-    to.path === '/user/my-plan' ||
-    to.path.startsWith('/user/my-plan') ||
-    to.path === '/user/my-favorite' ||
-    to.path.startsWith('/user/my-favorite')
-  if (needAuth && !localStorage.getItem('token')) {
+  const token = localStorage.getItem('token')
+  const publicPaths = ['/login', '/register']
+
+  if (!token) {
+    if (publicPaths.includes(to.path)) {
+      return true
+    }
     ElMessage.warning('请先登录')
     return { path: '/login', query: { redirect: to.fullPath } }
+  }
+
+  if (token && publicPaths.includes(to.path)) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      const role = payload.role
+      if (role === 'admin') return '/admin'
+      if (role === 'merchant') {
+        const auditStatus = localStorage.getItem('audit_status')
+        if (auditStatus !== 'approved') {
+          ElMessage.warning('商家账号待审核，请等待管理员审核通过后再登录')
+          clearAuth()
+          return true
+        }
+        return '/merchant/dashboard'
+      }
+      return '/'
+    } catch (e) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('username')
+      ElMessage.warning('请先登录')
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
+  }
+
+  if (token) {
+    try {
+      const payload = JSON.parse(atob(token.split('.')[1]))
+      const role = payload.role
+      if (to.path.startsWith('/admin') && role !== 'admin') {
+        return '/'
+      }
+      if (to.path.startsWith('/merchant')) {
+        if (role !== 'merchant') return '/'
+        const auditStatus = localStorage.getItem('audit_status')
+        if (auditStatus !== 'approved') {
+          ElMessage.warning('商家账号待审核，暂无法进入商家后台')
+          clearAuth()
+          return '/login'
+        }
+      }
+    } catch (e) {
+      localStorage.removeItem('token')
+      localStorage.removeItem('username')
+      ElMessage.warning('请先登录')
+      return { path: '/login', query: { redirect: to.fullPath } }
+    }
   }
   return true
 })

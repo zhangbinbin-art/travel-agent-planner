@@ -80,6 +80,50 @@
               </el-button>
               <el-button @click="handleReset">重置</el-button>
             </div>
+
+            <el-divider />
+            <div class="booking-block">
+              <div class="panel-title">酒店预约（可选）</div>
+              <el-form label-width="90px">
+                <el-form-item label="入住日期">
+                  <el-date-picker
+                    v-model="bookingStart"
+                    type="date"
+                    value-format="YYYY-MM-DD"
+                    placeholder="选择入住日期"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+                <el-form-item label="离店日期">
+                  <el-date-picker
+                    v-model="bookingEnd"
+                    type="date"
+                    value-format="YYYY-MM-DD"
+                    placeholder="选择离店日期"
+                    style="width: 100%"
+                  />
+                </el-form-item>
+                <el-form-item label="入住人数">
+                  <el-input-number v-model="guestCount" :min="1" :max="10" />
+                </el-form-item>
+                <el-form-item label="备注">
+                  <el-input v-model="remark" maxlength="200" placeholder="选填，如房型偏好、到店时间" />
+                </el-form-item>
+                <el-form-item>
+                  <el-button
+                    type="success"
+                    :disabled="!selectedHotelId"
+                    :loading="bookingSubmitting"
+                    @click="submitBooking"
+                  >
+                    提交酒店预约
+                  </el-button>
+                  <span v-if="!selectedHotelId" class="booking-tip">
+                    自定义价格仅用于预算估算，无法提交预约
+                  </span>
+                </el-form-item>
+              </el-form>
+            </div>
           </div>
         </el-col>
 
@@ -125,14 +169,36 @@
             <div v-else class="budget-empty">暂无预算信息</div>
 
             <el-divider content-position="left">路线顺序</el-divider>
-            <el-steps direction="vertical" :active="routeData.route.length" finish-status="success">
-              <el-step
-                v-for="(spot, idx) in routeData.route"
-                :key="spot.id"
-                :title="(idx + 1) + '. ' + spot.name + '（' + spot.city + '）'"
-                :description="'评分：' + spot.score + dayLabel(idx)"
-              />
-            </el-steps>
+            <div class="route-timeline">
+              <div
+                v-for="(item, idx) in timelineItems"
+                :key="item.key"
+                class="timeline-row"
+                :class="item.kind"
+              >
+                <div class="timeline-marker">
+                  <span class="timeline-dot" :class="item.kind"></span>
+                  <span
+                    v-if="idx < timelineItems.length - 1"
+                    class="timeline-connector"
+                  ></span>
+                </div>
+                <div class="timeline-content" @click="onTimelineClick(item)">
+                  <div class="timeline-title">
+                    <template v-if="item.kind === 'spot'">
+                      {{ item.no }}. {{ item.name }}（{{ item.city }}）
+                    </template>
+                    <template v-else>
+                      {{ item.name }}<span v-if="item.city">（{{ item.city }}）</span>
+                    </template>
+                  </div>
+                  <div class="timeline-meta">
+                    <template v-if="item.kind === 'spot'">评分：{{ item.score }} ｜ </template>
+                    第{{ item.day }}天
+                  </div>
+                </div>
+              </div>
+            </div>
 
             <el-divider content-position="left">路线图</el-divider>
             <div ref="chartRef" class="chart-container"></div>
@@ -144,49 +210,6 @@
             </div>
           </div>
           <el-empty v-else description="请填写偏好并生成智能行程" />
-
-          <div class="panel booking-panel">
-            <div class="panel-title">酒店预约（可选）</div>
-            <el-form label-width="90px">
-              <el-form-item label="入住日期">
-                <el-date-picker
-                  v-model="bookingStart"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="选择入住日期"
-                  style="width: 100%"
-                />
-              </el-form-item>
-              <el-form-item label="离店日期">
-                <el-date-picker
-                  v-model="bookingEnd"
-                  type="date"
-                  value-format="YYYY-MM-DD"
-                  placeholder="选择离店日期"
-                  style="width: 100%"
-                />
-              </el-form-item>
-              <el-form-item label="入住人数">
-                <el-input-number v-model="guestCount" :min="1" :max="10" />
-              </el-form-item>
-              <el-form-item label="备注">
-                <el-input v-model="remark" maxlength="200" placeholder="选填，如房型偏好、到店时间" />
-              </el-form-item>
-              <el-form-item>
-                <el-button
-                  type="success"
-                  :disabled="!selectedHotelId"
-                  :loading="bookingSubmitting"
-                  @click="submitBooking"
-                >
-                  提交酒店预约
-                </el-button>
-                <span v-if="!selectedHotelId" class="booking-tip">
-                  自定义价格仅用于预算估算，无法提交预约
-                </span>
-              </el-form-item>
-            </el-form>
-          </div>
         </el-col>
       </el-row>
     </el-card>
@@ -349,12 +372,75 @@ const startSpotName = computed(() => {
   return targetCity.value || '出发位置'
 })
 
-const dayLabel = (idx) => {
-  const plans = routeData.value?.day_plans || []
-  for (const p of plans) {
-    if (p.spot_ids?.includes(routeData.value.route[idx]?.id)) return ' ｜ 第' + p.day + '天'
+const hotelCity = (hotel) => {
+  if (!hotel) return ''
+  const match = String(hotel.address || '').match(/^(.+?市)/)
+  if (match) return match[1].replace(/市$/, '')
+  return targetCity.value || ''
+}
+
+// 路线顺序时间轴：景点（绿色）+ 每日末尾酒店节点（蓝色，选中酒店时才渲染）
+const timelineItems = computed(() => {
+  if (!routeData.value) return []
+  const route = routeData.value.route || []
+  const plans = routeData.value.day_plans || []
+  const hotel = selectedHotel.value
+  const items = []
+  let spotNo = 0
+
+  const pushSpot = (spot, day) => {
+    if (!spot) return
+    spotNo += 1
+    items.push({
+      key: 'spot-' + spot.id + '-d' + day,
+      kind: 'spot',
+      id: spot.id,
+      name: spot.name,
+      city: spot.city,
+      score: spot.score,
+      day,
+      no: spotNo
+    })
   }
-  return ''
+  const pushHotel = (day) => {
+    if (!hotel) return
+    items.push({
+      key: 'hotel-' + hotel.id + '-d' + day,
+      kind: 'hotel',
+      id: hotel.id,
+      name: hotel.name,
+      city: hotelCity(hotel),
+      day
+    })
+  }
+
+  if (plans.length) {
+    plans.forEach((plan) => {
+      const daySpots = (plan.spot_ids || [])
+        .map((id) => route.find((s) => s.id === id))
+        .filter(Boolean)
+      daySpots.forEach((spot) => pushSpot(spot, plan.day))
+      if (daySpots.length) pushHotel(plan.day)
+    })
+  } else {
+    route.forEach((spot) => pushSpot(spot, 1))
+    if (route.length) pushHotel(1)
+  }
+  return items
+})
+
+const isValidId = (id) => Number.isFinite(Number(id)) && Number(id) > 0
+
+const onTimelineClick = (item) => {
+  if (!isValidId(item.id)) {
+    console.warn('[Plan] 节点 id 不存在，跳过跳转:', item)
+    return
+  }
+  if (item.kind === 'spot') {
+    router.push(`/spot-detail/${item.id}`)
+  } else {
+    router.push(`/hotel-detail/${item.id}`)
+  }
 }
 
 const extractError = (e, fallback) => {
@@ -848,13 +934,75 @@ onBeforeUnmount(() => {
   flex: 1;
   max-width: 320px;
 }
-.booking-panel {
-  margin-top: 16px;
-  min-height: auto;
+.booking-block {
+  margin-top: 4px;
 }
 .booking-tip {
   margin-left: 12px;
   color: #e6a23c;
   font-size: 12px;
+}
+.route-timeline {
+  padding: 4px 0 4px 4px;
+}
+.timeline-row {
+  display: flex;
+  align-items: stretch;
+  gap: 12px;
+  min-height: 44px;
+}
+.timeline-marker {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  width: 14px;
+  flex-shrink: 0;
+  padding-top: 4px;
+}
+.timeline-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.timeline-dot.spot {
+  background: #67c23a;
+  box-shadow: 0 0 0 3px rgba(103, 194, 58, 0.15);
+}
+.timeline-dot.hotel {
+  background: #409eff;
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15);
+}
+.timeline-connector {
+  flex: 1;
+  width: 2px;
+  min-height: 20px;
+  background: #e4e7ed;
+  margin-top: 4px;
+}
+.timeline-content {
+  flex: 1;
+  padding: 0 8px 14px;
+  cursor: pointer;
+  border-radius: 4px;
+  transition: background 0.2s;
+}
+.timeline-content:hover {
+  background: #f5f7fa;
+}
+.timeline-title {
+  color: #303133;
+  font-size: 14px;
+  line-height: 20px;
+  font-weight: 500;
+}
+.timeline-row.hotel .timeline-title {
+  color: #409eff;
+}
+.timeline-meta {
+  color: #909399;
+  font-size: 13px;
+  line-height: 18px;
+  margin-top: 4px;
 }
 </style>
