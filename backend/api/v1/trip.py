@@ -5,6 +5,8 @@ from api.deps import get_current_user
 from core.database import get_db
 from models import User
 from schemas.trip import (
+    SmartRecommendRequest,
+    SmartRecommendResponse,
     TripDetail,
     TripGenerateRequest,
     TripGenerateResponse,
@@ -55,6 +57,18 @@ def save_trip(
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
     return trip_service.build_detail(trip)
+
+
+@router.post("/smart-recommend", response_model=SmartRecommendResponse)
+def smart_recommend(
+    payload: SmartRecommendRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    try:
+        return trip_service.smart_recommend(db, payload)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
 
 
 @router.get("/my", response_model=TripListResponse)

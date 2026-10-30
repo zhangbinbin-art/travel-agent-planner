@@ -350,8 +350,8 @@ def generate_route(
     if start_spot_id not in ordered_ids:
         ordered_ids.insert(0, start_spot_id)
 
-    if len(ordered_ids) < 2:
-        raise ValueError("至少选择两个景点")
+    if len(ordered_ids) < 1:
+        raise ValueError("至少选择一个景点")
 
     # 起点本身也必须存在（覆盖“起点不在 spot_ids 里且 id 非法”的情况）
     if start_spot_id not in spot_map:
@@ -565,4 +565,233 @@ def build_detail(trip: Trip) -> dict:
         "start_spot_id": route_data.get("start_spot_id"),
         "days": days,
         "budget": budget,
+    }
+
+# ---------------------------------------------------------------------------
+# v0.10 纯智能规划：偏好加权推荐（规则引擎，不接大模型）
+# ---------------------------------------------------------------------------
+
+from models import Hotel  # noqa: E402
+
+_PREF_THEME = {
+    "自然风光": "自然风景",
+    "人文古迹": "历史古迹",
+    "游乐乐园": "主题乐园",
+    "城市逛街": "城市观光",
+}
+
+_PREF_KEYWORDS = {
+    "美食探店": ("美食", "小吃", "探店", "夜市", "餐厅"),
+    "徒步登山": ("徒步", "登山", "山", "森林", "步道"),
+}
+
+
+def _hotel_type(name: str) -> str:
+    name = name or ""
+    if "民宿" in name:
+        return "民宿"
+    if "电竞" in name:
+        return "电竞酒店"
+    if "星期八" in name:
+        return "连锁酒店"
+    if "西瓜" in name:
+        return "商务酒店"
+    return "其他酒店"
+
+
+def _spot_text(spot) -> str:
+    return " ".join(
+        [str(getattr(spot, "name", "") or ""), str(getattr(spot, "tags", "") or ""), str(getattr(spot, "description", "") or "")]
+    )
+
+
+def _matches_preference(spot, pref: str) -> bool:
+    theme = getattr(spot, "theme", None) or ""
+    text = _spot_text(spot)
+    if pref in _PREF_THEME:
+        target = _PREF_THEME[pref]
+        return theme == target or target in text
+    for keyword in _PREF_KEYWORDS.get(pref, ()):
+        if keyword in text:
+            return True
+    return False
+
+
+def score_spot(spot, travel_type: str, preferences) -> float:
+    """规则加权引擎：base_score + 出行类型加权 + 偏好加权。"""
+    score = float(getattr(spot, "score", 0) or 0)
+    theme = getattr(spot, "theme", None) or ""
+    text = _spot_text(spot)
+
+    if travel_type == "家庭亲子":
+        if theme == "主题乐园":
+            score += 3
+        if "徒步" in text or "登山" in text:
+            score -= 2
+    elif travel_type == "老年休闲":
+        if "徒步" in text or "登山" in text:
+            score -= 3
+        if theme == "历史古迹":
+            score += 2
+    elif travel_type == "单人出行":
+        if "美食" in text or "小吃" in text:
+            score += 2
+        if "徒步" in text or "登山" in text:
+            score += 1
+    elif travel_type == "情侣出行":
+        if theme == "自然风景":
+            score += 2
+
+    for pref in set(preferences or []):
+        if _matches_preference(spot, pref):
+            score += 2
+    return round(score, 2)
+
+
+def _departure_distance(lat, lng, spot) -> Optional[float]:
+    """出发点到景点的距离；无密钥或坐标时返回 None（排序回退到评分顺序）。"""
+    if lat is None or lng is None:
+        return None
+    if not (settings.AMAP_KEY and spot.lat is not None and spot.lng is not None):
+        return None
+    try:
+        return _fetch_amap_distance((lng, lat), (spot.lng, spot.lat))
+    except Exception:
+        return None
+
+
+def _order_day(group, start_spot):
+    """贪心最近邻排序，减少折返；day1 可从离出发位置最近的景点开始。"""
+    remaining = [spot for spot in group]
+    if not remaining:
+        return []
+    order = []
+    current = start_spot if start_spot in remaining else remaining[0]
+    remaining.remove(current)
+    order.append(current)
+    while remaining:
+        next_spot = min(remaining, key=lambda s: (get_distance(current, s), s.id))
+        remaining.remove(next_spot)
+        order.append(next_spot)
+        current = next_spot
+    return order
+
+
+def recommend_hotels(db: Session, payload) -> list:
+    query = db.query(Hotel).filter(Hotel.status == "on_shelf")
+    # 单目的地：只取目标城市酒店（地址包含城市名）
+    query = query.filter(Hotel.address.contains(payload.target_city))
+    if payload.min_price is not None:
+        query = query.filter(Hotel.price_per_day >= payload.min_price)
+    if payload.max_price is not None:
+        query = query.filter(Hotel.price_per_day <= payload.max_price)
+    if payload.min_env_score is not None:
+        query = query.filter(Hotel.env_score >= payload.min_env_score)
+    if payload.min_service_score is not None:
+        query = query.filter(Hotel.service_score >= payload.min_service_score)
+    hotels = query.all()
+
+    if payload.hotel_types:
+        hotels = [h for h in hotels if _hotel_type(h.name) in payload.hotel_types]
+    if payload.hotel_features:
+        hotels = [
+            h
+            for h in hotels
+            if all(f in (h.facilities or "") for f in payload.hotel_features)
+        ]
+
+    hotels.sort(key=lambda h: ((h.env_score or 0) + (h.service_score or 0)), reverse=True)
+    return [
+        {
+            "id": h.id,
+            "name": h.name,
+            "address": h.address,
+            "price_per_day": h.price_per_day,
+            "cover_img": h.cover_img,
+            "description": h.description,
+            "facilities": h.facilities,
+            "env_score": h.env_score,
+            "service_score": h.service_score,
+            "hotel_type": _hotel_type(h.name),
+            "status": h.status,
+        }
+        for h in hotels[:6]
+    ]
+
+
+def smart_recommend(db: Session, payload) -> dict:
+    """单目的地智能推荐：评分排序 -> 按天拆分(每日≤3) -> 就近排序 -> 预算与酒店。"""
+    spots = db.query(Spot).filter(Spot.city == payload.target_city).all()
+    if not spots:
+        raise ValueError(f"目标城市暂无可推荐景点: {payload.target_city}")
+
+    scored = [(score_spot(s, payload.travel_type, payload.preferences), s) for s in spots]
+    scored.sort(key=lambda item: (-item[0], -(float(getattr(item[1], "score", 0) or 0)), item[1].id))
+
+    safe_days = max(1, min(int(payload.days or 1), 10))
+    picked = [s for _, s in scored[: safe_days * 3]]
+    if not picked:
+        raise ValueError("没有符合偏好的景点")
+
+    # 拆分日程：每日最多 3 个景点
+    groups = [picked[i : i + 3] for i in range(0, len(picked), 3)]
+
+    ordered_route = []
+    day_plans = []
+    for idx, group in enumerate(groups):
+        if not group:
+            continue
+        start_spot = group[0]
+        if idx == 0:
+            # 第一天从离出发位置最近的景点开始
+            best = None
+            best_dist = None
+            for spot in group:
+                dist = _departure_distance(payload.start_lat, payload.start_lng, spot)
+                if dist is not None and (best_dist is None or dist < best_dist):
+                    best, best_dist = spot, dist
+            if best is not None:
+                start_spot = best
+        day_order = _order_day(group, start_spot)
+        ordered_route.extend(day_order)
+        day_plans.append(
+            {
+                "day": idx + 1,
+                "spot_ids": [s.id for s in day_order],
+                "spot_names": [s.name for s in day_order],
+            }
+        )
+
+    route: List[RouteSpot] = []
+    for order, spot in enumerate(ordered_route):
+        x, y = get_spot_point(spot)
+        route.append(
+            RouteSpot(
+                id=spot.id,
+                name=spot.name,
+                city=spot.city,
+                score=spot.score or 0,
+                x=x,
+                y=y,
+                order=order,
+            )
+        )
+
+    legs: List[RouteLeg] = []
+    for a, b in zip(ordered_route, ordered_route[1:]):
+        legs.append(RouteLeg(from_spot_id=a.id, to_spot_id=b.id, distance=get_distance(a, b)))
+    total_distance = round(sum(leg.distance for leg in legs), 2)
+
+    budget = compute_budget(route, safe_days, total_distance, payload.hotel_per_day)
+    hotels = recommend_hotels(db, payload)
+
+    return {
+        "route": route,
+        "legs": legs,
+        "total_distance": total_distance,
+        "budget": budget,
+        "day_plans": day_plans,
+        "recommended_hotels": hotels,
+        "target_city": payload.target_city,
+        "start_location": payload.start_location,
     }
