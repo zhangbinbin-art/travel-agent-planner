@@ -782,6 +782,11 @@ def smart_recommend(db: Session, payload) -> dict:
         legs.append(RouteLeg(from_spot_id=a.id, to_spot_id=b.id, distance=get_distance(a, b)))
     total_distance = round(sum(leg.distance for leg in legs), 2)
 
+    # 出发地 -> 第一个景点：作为整条路线起点距离并入总里程与交通预算
+    departure_distance = _departure_leg_distance(payload, ordered_route[0]) if ordered_route else None
+    if departure_distance:
+        total_distance = round(total_distance + departure_distance, 2)
+
     budget = compute_budget(route, safe_days, total_distance, payload.hotel_per_day)
     hotels = recommend_hotels(db, payload)
 
@@ -789,9 +794,58 @@ def smart_recommend(db: Session, payload) -> dict:
         "route": route,
         "legs": legs,
         "total_distance": total_distance,
+        "departure_distance": departure_distance,
         "budget": budget,
         "day_plans": day_plans,
         "recommended_hotels": hotels,
         "target_city": payload.target_city,
         "start_location": payload.start_location,
     }
+
+# 常用城市坐标（用于无高德 Key 时估算 出发地 -> 目的地 距离）
+_CITY_COORDS = {
+    "北京": (39.9042, 116.4074),
+    "上海": (31.2304, 121.4737),
+    "杭州": (30.2741, 120.1551),
+    "广州": (23.1291, 113.2644),
+    "深圳": (22.5431, 114.0579),
+    "南京": (32.0603, 118.7969),
+    "苏州": (31.2989, 120.5853),
+    "厦门": (24.4798, 118.0894),
+    "桂林": (25.2736, 110.29),
+    "珠海": (22.2707, 113.5767),
+    "嘉兴": (30.7461, 120.7555),
+    "成都": (30.5728, 104.0668),
+    "西安": (34.3416, 108.9398),
+    "重庆": (29.563, 106.5516),
+    "武汉": (30.5928, 114.3055),
+    "长沙": (28.2282, 112.9388),
+    "青岛": (36.0671, 120.3826),
+    "天津": (39.3434, 117.3616),
+    "昆明": (24.8801, 102.8329),
+    "三亚": (18.2528, 109.5119),
+}
+
+
+def _haversine_km(lat1, lng1, lat2, lng2) -> float:
+    from math import asin, cos, radians, sin, sqrt
+
+    lat1, lng1, lat2, lng2 = map(float, (lat1, lng1, lat2, lng2))
+    dlat = radians(lat2 - lat1)
+    dlng = radians(lng2 - lng1)
+    a = sin(dlat / 2) ** 2 + cos(radians(lat1)) * cos(radians(lat2)) * sin(dlng / 2) ** 2
+    return round(2 * 6371 * asin(sqrt(a)), 2)
+
+
+def _departure_leg_distance(payload, first_spot) -> Optional[float]:
+    """出发地 -> 第一个景点距离：优先高德，缺失时用城市坐标 haversine 估算。"""
+    if payload.start_lat is None or payload.start_lng is None:
+        return None
+    explicit = _departure_distance(payload.start_lat, payload.start_lng, first_spot)
+    if explicit is not None:
+        return explicit
+    target = _CITY_COORDS.get((payload.target_city or "").strip())
+    if not target:
+        return None
+    dist = _haversine_km(payload.start_lat, payload.start_lng, target[0], target[1])
+    return dist if dist > 0.1 else 0.0

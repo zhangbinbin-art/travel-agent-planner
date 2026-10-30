@@ -37,6 +37,8 @@ class SmartRecommendResponse(BaseModel):
     recommended_hotels: List[dict] = Field(default_factory=list)
     target_city: str = ""
     start_location: Optional[str] = None
+    # 出发地 -> 第一个景点的距离（km），已并入 total_distance
+    departure_distance: Optional[float] = None
 
 
 class TripGenerateRequest(BaseModel):

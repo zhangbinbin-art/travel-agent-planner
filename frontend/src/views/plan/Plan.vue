@@ -18,7 +18,7 @@
                   clearable
                   class="start-city-input"
                 />
-                <el-button @click="mapDialogVisible = true">地图选点</el-button>
+                <el-button @click="openMapPicker">地图选点</el-button>
               </div>
               <div v-if="startLat && startLng" class="coord-tip">
                 已选取坐标：{{ startLat }}, {{ startLng }}
@@ -53,7 +53,8 @@
               <div class="section-label">酒店筛选与选择</div>
               <HotelPicker
                 v-model="selectedHotelId"
-                :city-list="cityWhitelist"
+                :city="targetCity.trim()"
+                :require-city="true"
                 :allow-custom="true"
                 @change="onHotelChange"
               />
@@ -190,8 +191,24 @@
       </el-row>
     </el-card>
 
-    <el-dialog v-model="mapDialogVisible" title="地图选点（获取经纬度）" width="460px">
+    <el-dialog v-model="mapDialogVisible" title="地图选点（回填位置与经纬度）" width="520px">
       <el-form label-width="80px">
+        <el-form-item label="位置名称">
+          <el-input v-model="tempName" placeholder="例如：杭州" />
+        </el-form-item>
+        <el-form-item label="快速选择">
+          <div class="city-grid">
+            <el-button
+              v-for="(coord, city) in CITY_COORDS"
+              :key="city"
+              size="small"
+              :type="tempName === city ? 'primary' : 'default'"
+              @click="pickCity(city)"
+            >
+              {{ city }}
+            </el-button>
+          </div>
+        </el-form-item>
         <el-form-item label="纬度">
           <el-input v-model="tempLat" placeholder="例如 30.2741" />
         </el-form-item>
@@ -200,7 +217,7 @@
         </el-form-item>
         <el-form-item>
           <el-button @click="useCurrentLocation">使用当前位置</el-button>
-          <span class="coord-hint">也可手动填写经纬度，用于行程排序</span>
+          <span class="coord-hint">选择城市或定位后自动回填名称与经纬度</span>
         </el-form-item>
       </el-form>
       <template #footer>
@@ -237,6 +254,7 @@ const startLocation = ref('')
 const startLat = ref('')
 const startLng = ref('')
 const mapDialogVisible = ref(false)
+const tempName = ref('')
 const tempLat = ref('')
 const tempLng = ref('')
 const targetCity = ref('')
@@ -266,9 +284,64 @@ let resizeHandler = null
 // 生成路线时实际使用的食宿单价快照
 const generatedHotelPerDay = ref(null)
 
-const cityWhitelist = computed(() => {
-  const city = (targetCity.value || '').trim()
-  return city ? [city] : []
+// 常用城市坐标表：用于输入框手动填写地点时解析经纬度，以及定位后回填城市名
+const CITY_COORDS = {
+  北京: [39.9042, 116.4074],
+  上海: [31.2304, 121.4737],
+  杭州: [30.2741, 120.1551],
+  广州: [23.1291, 113.2644],
+  深圳: [22.5431, 114.0579],
+  南京: [32.0603, 118.7969],
+  苏州: [31.2989, 120.5853],
+  厦门: [24.4798, 118.0894],
+  桂林: [25.2736, 110.29],
+  珠海: [22.2707, 113.5767],
+  嘉兴: [30.7461, 120.7555],
+  成都: [30.5728, 104.0668],
+  西安: [34.3416, 108.9398],
+  重庆: [29.563, 106.5516],
+  武汉: [30.5928, 114.3055],
+  长沙: [28.2282, 112.9388],
+  青岛: [36.0671, 120.3826],
+  天津: [39.3434, 117.3616],
+  昆明: [24.8801, 102.8329],
+  三亚: [18.2528, 109.5119]
+}
+
+const resolveCityCoords = (text) => {
+  const value = String(text || '').trim()
+  if (!value) return null
+  for (const [city, coord] of Object.entries(CITY_COORDS)) {
+    if (value.includes(city) || city.includes(value)) return { city, coord }
+  }
+  return null
+}
+
+const nearestCity = (lat, lng) => {
+  let best = null
+  let bestDist = Infinity
+  for (const [city, coord] of Object.entries(CITY_COORDS)) {
+    const dLat = Number(coord[0]) - lat
+    const dLng = Number(coord[1]) - lng
+    const dist = dLat * dLat + dLng * dLng
+    if (dist < bestDist) {
+      best = city
+      bestDist = dist
+    }
+  }
+  return best
+}
+
+// 手动填写出发位置时自动解析经纬度（与地图选点保持双向一致）
+watch(startLocation, (val) => {
+  const resolved = resolveCityCoords(val)
+  if (resolved) {
+    startLat.value = resolved.coord[0].toFixed(4)
+    startLng.value = resolved.coord[1].toFixed(4)
+  } else if (!String(val || '').trim()) {
+    startLat.value = ''
+    startLng.value = ''
+  }
 })
 
 const startSpotName = computed(() => {
@@ -398,6 +471,21 @@ const handleReset = () => {
   }
 }
 
+const openMapPicker = () => {
+  tempName.value = startLocation.value || ''
+  tempLat.value = startLat.value || ''
+  tempLng.value = startLng.value || ''
+  mapDialogVisible.value = true
+}
+
+const pickCity = (city) => {
+  const coord = CITY_COORDS[city]
+  if (!coord) return
+  tempName.value = city
+  tempLat.value = coord[0].toFixed(4)
+  tempLng.value = coord[1].toFixed(4)
+}
+
 const useCurrentLocation = () => {
   if (!navigator.geolocation) {
     ElMessage.warning('当前浏览器不支持定位，请手动填写经纬度')
@@ -405,8 +493,12 @@ const useCurrentLocation = () => {
   }
   navigator.geolocation.getCurrentPosition(
     (pos) => {
-      tempLat.value = pos.coords.latitude.toFixed(6)
-      tempLng.value = pos.coords.longitude.toFixed(6)
+      const lat = Number(pos.coords.latitude.toFixed(6))
+      const lng = Number(pos.coords.longitude.toFixed(6))
+      tempLat.value = String(lat)
+      tempLng.value = String(lng)
+      const city = nearestCity(lat, lng)
+      if (city) tempName.value = city
       ElMessage.success('已获取当前位置坐标')
     },
     () => ElMessage.warning('定位失败，请手动填写经纬度')
@@ -414,8 +506,17 @@ const useCurrentLocation = () => {
 }
 
 const confirmLocation = () => {
-  startLat.value = String(tempLat.value || '').trim()
-  startLng.value = String(tempLng.value || '').trim()
+  const name = String(tempName.value || '').trim()
+  const lat = String(tempLat.value || '').trim()
+  const lng = String(tempLng.value || '').trim()
+  if (!lat || !lng) {
+    ElMessage.warning('请选择城市或填写经纬度')
+    return
+  }
+  // 名称与坐标双向统一：名称优先，缺失时用最近城市名回填
+  startLocation.value = name || nearestCity(Number(lat), Number(lng)) || startLocation.value
+  startLat.value = lat
+  startLng.value = lng
   mapDialogVisible.value = false
 }
 
