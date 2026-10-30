@@ -56,7 +56,9 @@
                 :city="targetCity.trim()"
                 :require-city="true"
                 :allow-custom="true"
+                :reset-signal="hotelResetSignal"
                 @change="onHotelChange"
+                @filters-change="hotelFilters = $event"
               />
             </div>
 
@@ -252,8 +254,8 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
-import { useRouter } from 'vue-router'
+import { ref, computed, watch, onMounted, onActivated, onBeforeUnmount, nextTick } from 'vue'
+import { useRouter, onBeforeRouteLeave } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import * as echarts from 'echarts/core'
 import { GraphChart } from 'echarts/charts'
@@ -265,7 +267,13 @@ import { createHotelBooking } from '@/api/hotel'
 import { auth } from '@/utils/auth'
 import HotelPicker from '@/components/hotel/HotelPicker.vue'
 
+defineOptions({ name: 'Plan' })
+
 const router = useRouter()
+
+const PLAN_CACHE_KEY = 'last_trip_plan'
+// 离开本页时是否前往详情页（用于 KeepAlive 返回恢复判断）
+let leftToDetail = false
 
 // 按需注册 ECharts 模块，避免整包引入导致 Plan 页 chunk 过大
 echarts.use([GraphChart, GridComponent, TooltipComponent, CanvasRenderer])
@@ -285,9 +293,20 @@ const travelType = ref('单人出行')
 const preferences = ref([])
 const days = ref(2)
 
+const defaultHotelFilters = () => ({
+  types: [],
+  price: [0, 2000],
+  minEnv: 0,
+  minService: 0,
+  features: []
+})
+const hotelFilters = ref(defaultHotelFilters())
+const hotelResetSignal = ref(0)
 const hotelPerDay = ref(300)
 const selectedHotelId = ref('')
 const selectedHotel = ref(null)
+// 是否由后端自动推荐回填（用于区分用户手动切换）
+const autoHotelApplied = ref(false)
 const bookingStart = ref('')
 const bookingEnd = ref('')
 const guestCount = ref(1)
@@ -379,26 +398,26 @@ const hotelCity = (hotel) => {
   return targetCity.value || ''
 }
 
-// 路线顺序时间轴：景点（绿色）+ 每日末尾酒店节点（蓝色，选中酒店时才渲染）
+// 路线顺序时间轴：优先使用后端 nodes 顺序（景点/酒店穿插），酒店节点使用当前选中酒店
 const timelineItems = computed(() => {
   if (!routeData.value) return []
   const route = routeData.value.route || []
-  const plans = routeData.value.day_plans || []
+  const nodes = routeData.value.nodes || []
   const hotel = selectedHotel.value
   const items = []
   let spotNo = 0
 
-  const pushSpot = (spot, day) => {
-    if (!spot) return
+  const pushSpot = (node) => {
+    const spot = route.find((s) => s.id === node.id)
     spotNo += 1
     items.push({
-      key: 'spot-' + spot.id + '-d' + day,
+      key: 'spot-' + node.id + '-d' + (node.day || 1) + '-' + spotNo,
       kind: 'spot',
-      id: spot.id,
-      name: spot.name,
-      city: spot.city,
-      score: spot.score,
-      day,
+      id: node.id,
+      name: node.name || spot?.name,
+      city: spot?.city || '',
+      score: node.score ?? spot?.score,
+      day: node.day || 1,
       no: spotNo
     })
   }
@@ -414,17 +433,17 @@ const timelineItems = computed(() => {
     })
   }
 
-  if (plans.length) {
-    plans.forEach((plan) => {
-      const daySpots = (plan.spot_ids || [])
-        .map((id) => route.find((s) => s.id === id))
-        .filter(Boolean)
-      daySpots.forEach((spot) => pushSpot(spot, plan.day))
-      if (daySpots.length) pushHotel(plan.day)
+  if (nodes.length) {
+    nodes.forEach((node) => {
+      if (node.node_type === 'hotel') {
+        pushHotel(node.day || 1)
+      } else {
+        pushSpot(node)
+      }
     })
   } else {
-    route.forEach((spot) => pushSpot(spot, 1))
-    if (route.length) pushHotel(1)
+    // 兼容旧数据：无 nodes 时按景点顺序渲染
+    route.forEach((spot) => pushSpot({ id: spot.id, name: spot.name, score: spot.score, day: 1 }))
   }
   return items
 })
@@ -485,7 +504,12 @@ const refreshBudgetHotel = (pricePerDay) => {
 
 const onHotelChange = (hotel) => {
   selectedHotel.value = hotel || null
-  if (!hotel) return
+  if (!hotel) {
+    autoHotelApplied.value = false
+    return
+  }
+  // 用户手动切换酒店：更新节点与食宿预算
+  autoHotelApplied.value = false
   hotelPerDay.value = Number(hotel.price_per_day) || 0
   refreshBudgetHotel(hotelPerDay.value)
 }
@@ -495,6 +519,126 @@ watch(hotelPerDay, (val) => {
     refreshBudgetHotel(val)
   }
 })
+
+const buildHotelFilterPayload = () => {
+  const f = hotelFilters.value || defaultHotelFilters()
+  const [minP, maxP] = f.price || [0, 2000]
+  return {
+    hotel_types: f.types || [],
+    min_price: minP > 0 ? minP : null,
+    max_price: maxP < 2000 ? maxP : null,
+    min_env_score: f.minEnv > 0 ? f.minEnv : null,
+    min_service_score: f.minService > 0 ? f.minService : null,
+    hotel_features: f.features || []
+  }
+}
+
+const applyAutoHotel = (hotel) => {
+  if (!hotel) return
+  selectedHotelId.value = hotel.hotel_id || hotel.id
+  selectedHotel.value = {
+    id: hotel.hotel_id || hotel.id,
+    name: hotel.hotel_name || hotel.name,
+    price_per_day: hotel.price ?? hotel.price_per_day,
+    address: hotel.address,
+    env_score: hotel.env_score,
+    service_score: hotel.service_score,
+    facilities: hotel.facilities,
+    cover_img: hotel.cover_img,
+    description: hotel.description
+  }
+  hotelPerDay.value = Number(hotel.price ?? hotel.price_per_day) || 0
+  generatedHotelPerDay.value = hotelPerDay.value
+  autoHotelApplied.value = true
+}
+
+const slimRouteData = (data) => {
+  if (!data) return null
+  const clone = JSON.parse(JSON.stringify(data))
+  delete clone.recommended_hotels
+  return clone
+}
+
+const slimHotel = (hotel) => {
+  if (!hotel) return null
+  return {
+    id: hotel.id,
+    name: hotel.name,
+    price_per_day: hotel.price_per_day,
+    address: hotel.address,
+    env_score: hotel.env_score,
+    service_score: hotel.service_score,
+    facilities: hotel.facilities
+  }
+}
+
+const savePlanCache = () => {
+  try {
+    const payload = {
+      startLocation: startLocation.value,
+      startLat: startLat.value,
+      startLng: startLng.value,
+      targetCity: targetCity.value,
+      travelType: travelType.value,
+      preferences: preferences.value,
+      days: days.value,
+      hotelFilters: hotelFilters.value,
+      hotelPerDay: hotelPerDay.value,
+      selectedHotelId: selectedHotelId.value,
+      selectedHotel: slimHotel(selectedHotel.value),
+      generatedHotelPerDay: generatedHotelPerDay.value,
+      routeData: slimRouteData(routeData.value),
+      planName: planName.value,
+      savedTripId: savedTripId.value,
+      bookingStart: bookingStart.value,
+      bookingEnd: bookingEnd.value,
+      guestCount: guestCount.value,
+      remark: remark.value
+    }
+    sessionStorage.setItem(PLAN_CACHE_KEY, JSON.stringify(payload))
+  } catch (e) {
+    console.warn('[Plan] 保存会话缓存失败:', e?.message)
+  }
+}
+
+const restorePlanCache = () => {
+  try {
+    const raw = sessionStorage.getItem(PLAN_CACHE_KEY)
+    if (!raw) return false
+    const data = JSON.parse(raw)
+    startLocation.value = data.startLocation || ''
+    startLat.value = data.startLat || ''
+    startLng.value = data.startLng || ''
+    targetCity.value = data.targetCity || ''
+    travelType.value = data.travelType || '单人出行'
+    preferences.value = data.preferences || []
+    days.value = data.days || 2
+    hotelFilters.value = data.hotelFilters || defaultHotelFilters()
+    hotelPerDay.value = data.hotelPerDay ?? 300
+    selectedHotelId.value = data.selectedHotelId ?? ''
+    selectedHotel.value = data.selectedHotel || null
+    generatedHotelPerDay.value = data.generatedHotelPerDay ?? null
+    routeData.value = data.routeData || null
+    planName.value = data.planName || ''
+    savedTripId.value = data.savedTripId ?? null
+    bookingStart.value = data.bookingStart || ''
+    bookingEnd.value = data.bookingEnd || ''
+    guestCount.value = data.guestCount ?? 1
+    remark.value = data.remark || ''
+    return true
+  } catch (e) {
+    console.warn('[Plan] 读取会话缓存失败:', e?.message)
+    return false
+  }
+}
+
+const clearPlanCache = () => {
+  try {
+    sessionStorage.removeItem(PLAN_CACHE_KEY)
+  } catch (e) {
+    // ignore
+  }
+}
 
 const handleGenerate = async () => {
   if (!targetCity.value || !targetCity.value.trim()) {
@@ -509,9 +653,7 @@ const handleGenerate = async () => {
   generating.value = true
   routeData.value = null
   try {
-    const sentHotelPerDay = selectedHotel.value
-      ? Number(selectedHotel.value.price_per_day) || 0
-      : hotelPerDay.value
+    // 生成时由后端自动挑选酒店并按该酒店单价计算预算；手动切换在生成后本地重算
     const res = await api.post('/api/v1/trip/smart-recommend', {
       start_lat: startLat.value === '' ? null : Number(startLat.value),
       start_lng: startLng.value === '' ? null : Number(startLng.value),
@@ -520,13 +662,26 @@ const handleGenerate = async () => {
       travel_type: travelType.value,
       preferences: preferences.value,
       days: days.value,
-      hotel_per_day: sentHotelPerDay
+      hotel_per_day: null,
+      ...buildHotelFilterPayload()
     })
     routeData.value = res.data
-    generatedHotelPerDay.value = sentHotelPerDay
     planName.value = ''
     savedTripId.value = null
+    const autoHotel = res.data?.recommended_hotel
+    if (autoHotel) {
+      applyAutoHotel(autoHotel)
+      generatedHotelPerDay.value = Number(res.data?.hotel_per_day ?? autoHotel.price ?? 0)
+    } else {
+      // 无匹配酒店：不渲染酒店节点，提示用户放宽筛选
+      selectedHotelId.value = ''
+      selectedHotel.value = null
+      autoHotelApplied.value = false
+      generatedHotelPerDay.value = Number(res.data?.hotel_per_day ?? hotelPerDay.value)
+      ElMessage.warning('暂无匹配酒店，可放宽筛选条件')
+    }
     fillBookingDates(res.data?.budget?.days ?? days.value)
+    savePlanCache()
     await nextTick()
     initChart()
   } catch (e) {
@@ -536,7 +691,7 @@ const handleGenerate = async () => {
   }
 }
 
-const handleReset = () => {
+const resetAll = (clearCache = false) => {
   targetCity.value = ''
   startLocation.value = ''
   startLat.value = ''
@@ -544,17 +699,26 @@ const handleReset = () => {
   travelType.value = '单人出行'
   preferences.value = []
   days.value = 2
+  hotelFilters.value = defaultHotelFilters()
+  hotelResetSignal.value += 1
+  hotelPerDay.value = 300
   selectedHotelId.value = ''
   selectedHotel.value = null
+  autoHotelApplied.value = false
   routeData.value = null
   planName.value = ''
   generatedHotelPerDay.value = null
   savedTripId.value = null
-  // 预约表单（日期/人数/备注）保留，便于单独订酒店
+  if (clearCache) clearPlanCache()
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null
   }
+}
+
+const handleReset = () => {
+  // 预约表单（日期/人数/备注）保留，便于单独订酒店
+  resetAll(true)
 }
 
 const openMapPicker = () => {
@@ -690,39 +854,78 @@ const initChart = () => {
   }
   chartInstance = echarts.init(chartRef.value)
   const route = routeData.value.route || []
-  const legs = routeData.value.legs || []
-  const nodes = route.map((spot) => ({
-    name: String(spot.id),
-    value: spot.name,
-    x: spot.x,
-    y: spot.y,
-    symbolSize: 16,
-    itemStyle: { color: '#409eff' },
-    label: { show: true, formatter: spot.name, position: 'right' }
-  }))
-  const links = legs.map((leg) => ({
-    source: String(leg.from_spot_id),
-    target: String(leg.to_spot_id)
-  }))
+  const rawNodes = routeData.value.nodes || []
+  const hotelInfo = selectedHotel.value
+
+  // 按 nodes 顺序构建图数据；酒店节点位置取前后景点中点
+  const sequence = []
+  if (rawNodes.length) {
+    rawNodes.forEach((node) => {
+      if (node.node_type === 'hotel') {
+        if (hotelInfo) sequence.push({ kind: 'hotel', node })
+      } else {
+        sequence.push({ kind: 'spot', node })
+      }
+    })
+  } else {
+    route.forEach((spot) => sequence.push({ kind: 'spot', node: { id: spot.id, name: spot.name } }))
+  }
+
+  const graphNodes = []
+  const links = []
+  const coordOf = new Map()
+  route.forEach((spot) => coordOf.set(String(spot.id), { x: spot.x, y: spot.y }))
+
+  sequence.forEach((entry, idx) => {
+    if (entry.kind === 'spot') {
+      const spot = route.find((s) => s.id === entry.node.id)
+      if (!spot) return
+      graphNodes.push({
+        name: 'spot-' + spot.id,
+        value: spot.name,
+        x: spot.x,
+        y: spot.y,
+        symbolSize: 16,
+        itemStyle: { color: '#67c23a' },
+        label: { show: true, formatter: spot.name, position: 'right' }
+      })
+    } else {
+      if (!hotelInfo) return
+      // 取前后景点坐标中点作为酒店位置
+      const prev = sequence[idx - 1]
+      const next = sequence[idx + 1]
+      const prevCoord = prev?.kind === 'spot' ? coordOf.get(String(prev.node.id)) : null
+      const nextCoord = next?.kind === 'spot' ? coordOf.get(String(next.node.id)) : null
+      let pos = { x: 300, y: 300 }
+      if (prevCoord && nextCoord) {
+        pos = { x: (prevCoord.x + nextCoord.x) / 2, y: (prevCoord.y + nextCoord.y) / 2 }
+      } else if (prevCoord) {
+        pos = { x: prevCoord.x + 20, y: prevCoord.y + 20 }
+      } else if (nextCoord) {
+        pos = { x: nextCoord.x - 20, y: nextCoord.y - 20 }
+      }
+      graphNodes.push({
+        name: 'hotel-' + hotelInfo.id,
+        value: hotelInfo.name,
+        x: pos.x,
+        y: pos.y,
+        symbol: 'diamond',
+        symbolSize: 14,
+        itemStyle: { color: '#409eff' },
+        label: { show: true, formatter: hotelInfo.name, position: 'right' }
+      })
+    }
+  })
+
+  for (let i = 0; i < graphNodes.length - 1; i += 1) {
+    links.push({ source: graphNodes[i].name, target: graphNodes[i + 1].name })
+  }
+
   const option = {
     tooltip: {
       formatter: (params) => {
         if (params.dataType === 'node') {
-          const spot = route.find((s) => String(s.id) === params.name)
-          if (spot) {
-            return spot.name + '（' + spot.city + '）<br/>评分：' + spot.score
-          }
           return params.value
-        }
-        if (params.dataType === 'edge') {
-          const from = route.find((s) => String(s.id) === params.data.source)
-          const to = route.find((s) => String(s.id) === params.data.target)
-          const leg = legs.find(
-            (l) => String(l.from_spot_id) === params.data.source && String(l.to_spot_id) === params.data.target
-          )
-          if (from && to) {
-            return from.name + ' -> ' + to.name + '<br/>距离：' + (leg ? Number(leg.distance).toFixed(2) : '') + ' km'
-          }
         }
         return ''
       }
@@ -733,7 +936,7 @@ const initChart = () => {
       {
         type: 'graph',
         layout: 'none',
-        data: nodes,
+        data: graphNodes,
         links,
         roam: true,
         label: { show: true },
@@ -795,7 +998,36 @@ const handleSave = async () => {
   }
 }
 
+// 手动切换酒店时同步刷新路线图中的酒店节点
+watch(selectedHotel, () => {
+  if (routeData.value) {
+    nextTick(() => initChart())
+  }
+})
+
+onBeforeRouteLeave((to) => {
+  leftToDetail = to.name === 'SpotDetail' || to.name === 'HotelDetail'
+  if (leftToDetail && routeData.value) {
+    savePlanCache()
+  }
+})
+
 onMounted(() => {})
+
+onActivated(() => {
+  if (leftToDetail) {
+    leftToDetail = false
+    // 会话兜底：组件状态意外丢失时从 sessionStorage 恢复
+    if (!routeData.value && restorePlanCache()) {
+      nextTick(() => initChart())
+    } else if (routeData.value) {
+      nextTick(() => initChart())
+    }
+    return
+  }
+  // 从导航菜单或地址栏直接进入：全新初始化，不加载旧缓存
+  resetAll(true)
+})
 
 onBeforeUnmount(() => {
   if (chartInstance) {

@@ -28,6 +28,14 @@ class DayPlan(BaseModel):
     spot_names: List[str]
 
 
+class SmartNode(BaseModel):
+    node_type: str  # spot / hotel
+    id: int
+    name: str
+    score: Optional[float] = None
+    day: int = 1
+
+
 class SmartRecommendResponse(BaseModel):
     route: List["RouteSpot"]
     total_distance: float
@@ -35,6 +43,14 @@ class SmartRecommendResponse(BaseModel):
     budget: "TripBudget"
     day_plans: List[DayPlan] = Field(default_factory=list)
     recommended_hotels: List[dict] = Field(default_factory=list)
+    # 自动推荐的唯一酒店（每日共用）；无匹配时为 None
+    recommended_hotel: Optional[dict] = None
+    # 每日推荐酒店信息（同一家酒店按天列出）
+    daily_hotels: List[dict] = Field(default_factory=list)
+    no_hotel_match: bool = False
+    # 行程节点序列：景点/酒店按规则穿插，前端按顺序渲染
+    nodes: List[SmartNode] = Field(default_factory=list)
+    hotel_per_day: Optional[float] = None
     target_city: str = ""
     start_location: Optional[str] = None
     # 出发地 -> 第一个景点的距离（km），已并入 total_distance

@@ -1,5 +1,6 @@
 import heapq
 import json
+import re
 import urllib.parse
 import urllib.request
 from hashlib import md5
@@ -787,8 +788,89 @@ def smart_recommend(db: Session, payload) -> dict:
     if departure_distance:
         total_distance = round(total_distance + departure_distance, 2)
 
-    budget = compute_budget(route, safe_days, total_distance, payload.hotel_per_day)
+    # 自动推荐酒店：仅从满足筛选条件的同城酒店池中挑选 1 家（环境+服务总分最高）
     hotels = recommend_hotels(db, payload)
+    auto_hotel = None
+    if hotels:
+        best = hotels[0]
+        city = ""
+        match = re.match(r"^(.+?市)", best.get("address") or "")
+        if match:
+            city = match.group(1).replace("市", "")
+        auto_hotel = {
+            "hotel_id": best.get("id"),
+            "hotel_name": best.get("name"),
+            "price": best.get("price_per_day"),
+            "city": city or payload.target_city,
+            # 兼容前端下拉回填使用的字段
+            "id": best.get("id"),
+            "name": best.get("name"),
+            "price_per_day": best.get("price_per_day"),
+            "address": best.get("address"),
+            "env_score": best.get("env_score"),
+            "service_score": best.get("service_score"),
+            "facilities": best.get("facilities"),
+            "cover_img": best.get("cover_img"),
+            "description": best.get("description"),
+            "status": best.get("status"),
+        }
+
+    # 预算：用户未手动指定时，使用自动推荐酒店的单价
+    effective_hotel_price = payload.hotel_per_day
+    if effective_hotel_price is None and auto_hotel is not None:
+        effective_hotel_price = float(auto_hotel.get("price") or 0)
+    budget = compute_budget(route, safe_days, total_distance, effective_hotel_price)
+
+    # 节点组装：1天且≤2景点 -> 景点1、景点2、酒店；其余 -> 景点1、酒店、景点2、酒店……
+    route_map = {item.id: item for item in route}
+    total_spots = len(ordered_route)
+    compact_single_day = safe_days == 1 and total_spots <= 2
+    nodes = []
+    for plan in day_plans:
+        day_spots = [route_map[i] for i in plan["spot_ids"] if i in route_map]
+        if compact_single_day:
+            for spot in day_spots:
+                nodes.append(
+                    {"node_type": "spot", "id": spot.id, "name": spot.name, "score": spot.score, "day": plan["day"]}
+                )
+            if auto_hotel is not None:
+                nodes.append(
+                    {
+                        "node_type": "hotel",
+                        "id": auto_hotel["hotel_id"],
+                        "name": auto_hotel["hotel_name"],
+                        "score": None,
+                        "day": plan["day"],
+                    }
+                )
+        else:
+            for spot in day_spots:
+                nodes.append(
+                    {"node_type": "spot", "id": spot.id, "name": spot.name, "score": spot.score, "day": plan["day"]}
+                )
+                if auto_hotel is not None:
+                    nodes.append(
+                        {
+                            "node_type": "hotel",
+                            "id": auto_hotel["hotel_id"],
+                            "name": auto_hotel["hotel_name"],
+                            "score": None,
+                            "day": plan["day"],
+                        }
+                    )
+
+    daily_hotels = []
+    if auto_hotel is not None:
+        for plan in day_plans:
+            daily_hotels.append(
+                {
+                    "day": plan["day"],
+                    "hotel_id": auto_hotel["hotel_id"],
+                    "hotel_name": auto_hotel["hotel_name"],
+                    "price": auto_hotel["price"],
+                    "city": auto_hotel["city"],
+                }
+            )
 
     return {
         "route": route,
@@ -798,6 +880,11 @@ def smart_recommend(db: Session, payload) -> dict:
         "budget": budget,
         "day_plans": day_plans,
         "recommended_hotels": hotels,
+        "recommended_hotel": auto_hotel,
+        "daily_hotels": daily_hotels,
+        "no_hotel_match": auto_hotel is None,
+        "nodes": nodes,
+        "hotel_per_day": effective_hotel_price,
         "target_city": payload.target_city,
         "start_location": payload.start_location,
     }

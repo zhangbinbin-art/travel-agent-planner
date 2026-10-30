@@ -54,21 +54,24 @@ const props = defineProps({
   requireCity: { type: Boolean, default: false },
   // undefined = 不限制城市（单独预订）；数组 = 城市白名单（兼容旧用法）
   cityList: { type: Array, default: undefined },
-  allowCustom: { type: Boolean, default: true }
+  allowCustom: { type: Boolean, default: true },
+  // 父组件递增该值可重置筛选条件（用于“重置”按钮）
+  resetSignal: { type: Number, default: 0 }
 })
-const emit = defineEmits(['update:modelValue', 'change'])
+const emit = defineEmits(['update:modelValue', 'change', 'filters-change'])
 
 const hotels = ref([])
 const dialogVisible = ref(false)
 const detailHotel = ref(null)
-// 注意：必须用 ref；用 reactive + v-model 会在赋值时替换对象，导致筛选控件失效
-const filters = ref({
+const defaultFilters = () => ({
   types: [],
   price: [0, 2000],
   minEnv: 0,
   minService: 0,
   features: []
 })
+// 注意：必须用 ref；用 reactive + v-model 会在赋值时替换对象，导致筛选控件失效
+const filters = ref(defaultFilters())
 
 const disabled = computed(() => {
   if (props.requireCity) return !props.city
@@ -156,10 +159,20 @@ const openDetail = (hotel) => {
 
 watch(() => props.city, () => fetchHotels())
 watch(() => props.cityList, () => fetchHotels(), { deep: true })
+watch(
+  () => props.resetSignal,
+  () => {
+    filters.value = defaultFilters()
+    emit('filters-change', defaultFilters())
+    emit('update:modelValue', '')
+    emit('change', null)
+  }
+)
 // 城市酒店池不变，筛选条件变化只做前端二次过滤
 watch(
   filters,
   () => {
+    emit('filters-change', JSON.parse(JSON.stringify(filters.value)))
     hotels.value = applyFilters(sourcePool.value)
     // 已选酒店被筛掉时清空选择
     if (props.modelValue !== '' && !hotels.value.some((h) => h.id === props.modelValue)) {
