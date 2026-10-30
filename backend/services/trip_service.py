@@ -730,16 +730,33 @@ def smart_recommend(db: Session, payload) -> dict:
     scored.sort(key=lambda item: (-item[0], -(float(getattr(item[1], "score", 0) or 0)), item[1].id))
 
     safe_days = max(1, min(int(payload.days or 1), 10))
-    picked = [s for _, s in scored[: safe_days * 3]]
-    if not picked:
+    # 候选池：按评分降序，最多取 days*3（单日上限 3 个）
+    spot_pool = [s for _, s in scored[: safe_days * 3]]
+    if not spot_pool:
         raise ValueError("没有符合偏好的景点")
 
-    # 拆分日程：每日最多 3 个景点
-    groups = [picked[i : i + 3] for i in range(0, len(picked), 3)]
+    # 景点按天均分：每天尽量平均，优先保证每天至少 1 个；不足时复用最高分景点
+    reused = False
+    allocations = []
+    if len(spot_pool) >= safe_days:
+        base, rem = divmod(len(spot_pool), safe_days)
+        cursor = 0
+        for day_idx in range(safe_days):
+            count = base + (1 if day_idx < rem else 0)
+            allocations.append(spot_pool[cursor : cursor + count])
+            cursor += count
+    else:
+        for day_idx in range(safe_days):
+            if day_idx < len(spot_pool):
+                allocations.append([spot_pool[day_idx]])
+            else:
+                allocations.append([spot_pool[0]])
+                reused = True
 
     ordered_route = []
     day_plans = []
-    for idx, group in enumerate(groups):
+    seen_spot_ids = set()
+    for idx, group in enumerate(allocations):
         if not group:
             continue
         start_spot = group[0]
@@ -754,7 +771,11 @@ def smart_recommend(db: Session, payload) -> dict:
             if best is not None:
                 start_spot = best
         day_order = _order_day(group, start_spot)
-        ordered_route.extend(day_order)
+        # route 只保留唯一景点（复用景点不重复计入路线与预算）
+        for spot in day_order:
+            if spot.id not in seen_spot_ids:
+                seen_spot_ids.add(spot.id)
+                ordered_route.append(spot)
         day_plans.append(
             {
                 "day": idx + 1,
@@ -865,6 +886,8 @@ def smart_recommend(db: Session, payload) -> dict:
         "recommended_hotel": auto_hotel,
         "daily_hotels": daily_hotels,
         "no_hotel_match": auto_hotel is None,
+        "spot_reused": reused,
+        "matched_spot_count": len({s.id for s in spot_pool}),
         "nodes": nodes,
         "hotel_per_day": effective_hotel_price,
         "target_city": payload.target_city,

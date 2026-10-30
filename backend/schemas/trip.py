@@ -48,6 +48,9 @@ class SmartRecommendResponse(BaseModel):
     # 每日推荐酒店信息（同一家酒店按天列出）
     daily_hotels: List[dict] = Field(default_factory=list)
     no_hotel_match: bool = False
+    # 景点不足天数时是否复用了高分景点
+    spot_reused: bool = False
+    matched_spot_count: int = 0
     # 行程节点序列：景点/酒店按规则穿插，前端按顺序渲染
     nodes: List[SmartNode] = Field(default_factory=list)
     hotel_per_day: Optional[float] = None

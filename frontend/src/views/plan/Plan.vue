@@ -169,6 +169,9 @@
               </div>
             </div>
             <div v-else class="budget-empty">暂无预算信息</div>
+            <div v-if="routeData.spot_reused" class="reuse-hint">
+              ⚠️ 符合偏好景点数量不足，部分日期复用热门景点
+            </div>
 
             <el-divider content-position="left">路线顺序</el-divider>
             <div class="route-timeline">
@@ -860,9 +863,9 @@ const initChart = () => {
   const rawNodes = routeData.value.nodes || []
 
   // 路线图只渲染 spot 节点，hotel 节点不参与点位与连线
-  const spotIds = rawNodes
-    .filter((node) => node.node_type === 'spot')
-    .map((node) => node.id)
+  const spotIds = [
+    ...new Set(rawNodes.filter((node) => node.node_type === 'spot').map((node) => node.id))
+  ]
   const orderedRoute = spotIds.length
     ? spotIds.map((id) => route.find((s) => s.id === id)).filter(Boolean)
     : route.slice()
@@ -1107,6 +1110,14 @@ onBeforeUnmount(() => {
 .budget-empty {
   color: #909399;
   font-size: 13px;
+}
+.reuse-hint {
+  margin-top: 10px;
+  color: #909399;
+  font-size: 12px;
+  background: #f7f8fa;
+  border-radius: 4px;
+  padding: 8px 10px;
 }
 .chart-container {
   width: 100%;
