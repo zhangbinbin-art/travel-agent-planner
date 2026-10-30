@@ -134,6 +134,7 @@ class MerchantListResponse(BaseModel):
 
 class RoomBase(BaseModel):
     room_type: str = Field(..., min_length=1, max_length=100)
+    image_url: Optional[str] = None
     room_price: float = Field(0, ge=0)
     bed_info: Optional[str] = None
     max_guest: int = Field(2, ge=1, le=10)
@@ -147,6 +148,7 @@ class RoomCreate(RoomBase):
 
 class RoomUpdate(BaseModel):
     room_type: Optional[str] = Field(None, min_length=1, max_length=100)
+    image_url: Optional[str] = None
     room_price: Optional[float] = Field(None, ge=0)
     bed_info: Optional[str] = None
     max_guest: Optional[int] = Field(None, ge=1, le=10)

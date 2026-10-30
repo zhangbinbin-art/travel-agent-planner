@@ -56,6 +56,18 @@ def ensure_tables():
         print(f"{table}:", "exists" if insp.has_table(table) else "missing")
 
 
+def ensure_room_columns():
+    insp = inspect(engine)
+    existing = {col["name"] for col in insp.get_columns("rooms")}
+    if "image_url" not in existing:
+        typ = "MEDIUMTEXT NULL" if engine.dialect.name == "mysql" else "TEXT NULL"
+        with engine.begin() as conn:
+            conn.execute(text(f"ALTER TABLE rooms ADD COLUMN image_url {typ}"))
+        print("rooms.image_url added")
+    else:
+        print("rooms.image_url exists")
+
+
 def bind_merchants_and_rooms():
     db = SessionLocal()
     try:
@@ -75,6 +87,10 @@ def bind_merchants_and_rooms():
             if getattr(merchant, "merchant_hotel_id", None) != hotel.id:
                 merchant.merchant_hotel_id = hotel.id
                 print(f"bind {merchant.username} -> hotel {hotel.id} {hotel.name}")
+            # 双向绑定：酒店记录上也标记所属商户，便于后端校验绑定关系
+            if hotel.merchant_id != merchant.id:
+                hotel.merchant_id = merchant.id
+                print(f"hotel {hotel.id} merchant -> {merchant.username}")
         db.commit()
 
         for merchant in merchants:
@@ -102,5 +118,6 @@ if __name__ == "__main__":
     ensure_user_columns()
     ensure_hotel_nullable()
     ensure_tables()
+    ensure_room_columns()
     bind_merchants_and_rooms()
     print("=== init_v011 done ===")

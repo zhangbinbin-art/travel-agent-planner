@@ -5,7 +5,7 @@ from jwt import PyJWTError
 from core.config import settings
 from sqlalchemy.orm import Session
 from core.database import get_db
-from models import User
+from models import Hotel, User
 
 security = HTTPBearer(auto_error=False)
 
@@ -55,11 +55,23 @@ def require_merchant(current_user: User = Depends(get_current_user)):
     return current_user
 
 
-def require_merchant_hotel(current_user: User = Depends(require_merchant)) -> int:
-    """商家已审核且必须绑定唯一酒店，返回 hotel_id。"""
+def require_merchant_hotel(
+    current_user: User = Depends(require_merchant),
+    db: Session = Depends(get_db),
+) -> int:
+    """商家已审核且必须绑定唯一酒店，返回 hotel_id。
+
+    绑定关系完全由后端 token + 数据库决定，忽略前端传入的任何 hotel_id 参数；
+    商户侧所有查询都必须使用本函数返回的 hotel_id 做强制隔离。
+    """
     hotel_id = getattr(current_user, "merchant_hotel_id", None)
     if not hotel_id:
         raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="商家账号未绑定酒店，请联系管理员")
+    hotel = db.query(Hotel).filter(Hotel.id == hotel_id).first()
+    if not hotel:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="绑定酒店不存在，请联系管理员")
+    if hotel.merchant_id is not None and hotel.merchant_id != current_user.id:
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail="酒店绑定关系异常，请联系管理员")
     return hotel_id
 
 

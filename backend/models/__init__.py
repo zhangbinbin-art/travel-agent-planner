@@ -162,6 +162,8 @@ class Room(Base):
     bed_info = Column(String(100))
     max_guest = Column(Integer, default=2)
     stock = Column(Integer, default=10)
+    # 房型图片（链接或上传后的 base64），允许为空
+    image_url = Column(Text().with_variant(MEDIUMTEXT, "mysql"), nullable=True)
     # free / occupied / cleaning / maintenance
     status = Column(String(20), default="free")
     create_time = Column(DateTime(timezone=True), server_default=func.now())

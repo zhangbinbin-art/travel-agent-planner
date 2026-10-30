@@ -305,6 +305,8 @@ def admin_bind_merchant_hotel(
         hotel = db.query(Hotel).filter(Hotel.id == payload.hotel_id).first()
         if not hotel:
             raise HTTPException(status_code=404, detail="酒店不存在")
+        # 双向绑定：酒店记录同步所属商户，保证后端校验一致
+        hotel.merchant_id = user.id
     user.merchant_hotel_id = payload.hotel_id
     db.commit()
     db.refresh(user)
