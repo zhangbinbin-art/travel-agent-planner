@@ -44,7 +44,7 @@ class HotelStatusUpdate(BaseModel):
 
 class HotelOut(BaseModel):
     id: int
-    merchant_id: int
+    merchant_id: Optional[int] = None
     name: str
     address: Optional[str] = None
     lat: Optional[float] = None
@@ -131,3 +131,112 @@ class MerchantOut(BaseModel):
 class MerchantListResponse(BaseModel):
     items: List[MerchantOut]
     total: int
+
+class RoomBase(BaseModel):
+    room_type: str = Field(..., min_length=1, max_length=100)
+    room_price: float = Field(0, ge=0)
+    bed_info: Optional[str] = None
+    max_guest: int = Field(2, ge=1, le=10)
+    stock: int = Field(10, ge=0, le=999)
+    status: str = "free"
+
+
+class RoomCreate(RoomBase):
+    pass
+
+
+class RoomUpdate(BaseModel):
+    room_type: Optional[str] = Field(None, min_length=1, max_length=100)
+    room_price: Optional[float] = Field(None, ge=0)
+    bed_info: Optional[str] = None
+    max_guest: Optional[int] = Field(None, ge=1, le=10)
+    stock: Optional[int] = Field(None, ge=0, le=999)
+    status: Optional[str] = None
+
+
+class RoomOut(RoomBase):
+    id: int
+    hotel_id: int
+    create_time: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class RoomStatusUpdate(BaseModel):
+    status: str  # free / occupied / cleaning / maintenance
+
+
+class OrderCreate(BaseModel):
+    hotel_id: int
+    room_id: Optional[int] = None
+    check_in: date
+    check_out: date
+    people_count: Optional[int] = Field(1, ge=1, le=10)
+
+
+class PayRequest(BaseModel):
+    pay_channel: str  # wechat / alipay / card
+
+
+class OrderOut(BaseModel):
+    id: int
+    user_id: int
+    username: Optional[str] = None
+    hotel_id: int
+    hotel_name: Optional[str] = None
+    room_id: Optional[int] = None
+    room_type: Optional[str] = None
+    room_price: Optional[float] = None
+    check_in: date
+    check_out: date
+    days: int = 1
+    people_count: int = 1
+    total_price: float = 0
+    pay_channel: Optional[str] = None
+    order_status: str = "pending_pay"
+    create_time: Optional[datetime] = None
+    # 兼容旧字段名（前端历史逻辑）
+    start_date: Optional[date] = None
+    end_date: Optional[date] = None
+
+
+class OrderListResponse(BaseModel):
+    items: List[OrderOut]
+    total: int
+
+
+class GuestCreate(BaseModel):
+    order_id: int
+    real_name: Optional[str] = None
+    id_card: Optional[str] = None
+
+
+class GuestOut(BaseModel):
+    id: int
+    order_id: int
+    real_name: str
+    id_card: Optional[str] = None
+    checkin_time: Optional[datetime] = None
+    hotel_name: Optional[str] = None
+    room_type: Optional[str] = None
+
+
+class BillOut(BaseModel):
+    id: int
+    order_id: int
+    amount: float
+    pay_channel: Optional[str] = None
+    pay_time: Optional[datetime] = None
+    hotel_name: Optional[str] = None
+
+
+class ReportOut(BaseModel):
+    hotel_id: int
+    hotel_name: Optional[str] = None
+    order_total: int = 0
+    paid_total: int = 0
+    revenue: float = 0
+    check_in_today: int = 0
+    occupancy_rate: float = 0
+    daily: List[dict] = Field(default_factory=list)

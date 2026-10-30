@@ -1,6 +1,6 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from api.v1 import health, user, spot, favorite, post, comment, trip, admin
+from api.v1 import health, user, spot, favorite, post, comment, trip, admin, merchant, hotel
 
 app = FastAPI(title="个性化旅行规划平台API", version="0.1.0", description="基于Python的个性化旅行规划平台后端")
 
@@ -21,6 +21,8 @@ app.include_router(post.router, prefix="/api/v1/post", tags=["post"])
 app.include_router(comment.router, prefix="/api/v1/comment", tags=["comment"])
 app.include_router(trip.router, prefix="/api/v1/trip", tags=["trip"])
 app.include_router(admin.router, prefix="/api/v1/admin", tags=["admin"])
+app.include_router(merchant.router, prefix="/api/v1/merchant", tags=["merchant"])
+app.include_router(hotel.router, prefix="/api/v1/hotel", tags=["hotel"])
 
 
 @app.get("/")

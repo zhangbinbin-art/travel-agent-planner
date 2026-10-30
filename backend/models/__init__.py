@@ -1,4 +1,5 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, Float, ForeignKey, Boolean, UniqueConstraint
+from sqlalchemy import Column, Integer, String, DateTime, Text, Float, ForeignKey, Boolean, UniqueConstraint, Date
+from sqlalchemy.dialects.mysql import MEDIUMTEXT
 from sqlalchemy.orm import relationship
 from sqlalchemy.sql import func
 from core.database import Base
@@ -9,7 +10,17 @@ class User(Base):
     id = Column(Integer, primary_key=True, index=True)
     username = Column(String(50), unique=True, index=True, nullable=False)
     password_hash = Column(String(255), nullable=False)
-    role = Column(String(20), default="user")  # guest/user/admin
+    role = Column(String(20), default="user")  # user/merchant/admin
+    # 商家审核状态：pending（待审核）/ approved（已通过）/ rejected（驳回）
+    # 普通用户与管理员不参与商家审核，默认 approved
+    audit_status = Column(String(20), default="approved")
+    shop_name = Column(String(100), nullable=True)
+    # 实名认证（仅模拟校验，不调用公安接口）
+    is_real_name_auth = Column(Boolean, default=False)
+    real_name = Column(String(50), nullable=True)
+    id_card = Column(String(30), nullable=True)
+    # 商户绑定的唯一酒店（一个商户账号只管理一家酒店）
+    merchant_hotel_id = Column(Integer, ForeignKey("hotels.id"), nullable=True)
     email = Column(String(100), unique=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
@@ -19,9 +30,13 @@ class Spot(Base):
     id = Column(Integer, primary_key=True, index=True)
     name = Column(String(100), nullable=False)
     city = Column(String(50))
+    province = Column(String(50), nullable=True)
+    theme = Column(String(50), nullable=True)
     tags = Column(String(255))
     description = Column(Text)
     score = Column(Float, default=0)
+    price = Column(Float, nullable=True, default=0)
+    cover = Column(String(255), nullable=True)
     # 经纬度用双精度：MySQL 下 Float 为 4 字节单精度，会丢失 1e-4 量级（约 10m）
     lat = Column(Float(53), nullable=True)
     lng = Column(Float(53), nullable=True)
@@ -95,3 +110,99 @@ class Trip(Base):
     total_distance = Column(Float, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     author = relationship("User")
+
+
+class Hotel(Base):
+    __tablename__ = "hotels"
+    id = Column(Integer, primary_key=True, index=True)
+    # 酒店基础资料由管理员维护，允许先建酒店后绑定商户
+    merchant_id = Column(Integer, ForeignKey("users.id"), nullable=True)
+    name = Column(String(150), nullable=False)
+    address = Column(String(255))
+    lat = Column(Float(53), nullable=True)
+    lng = Column(Float(53), nullable=True)
+    price_per_day = Column(Float, default=0)
+    # 封面图支持链接或本地上传后的 base64，MySQL 需 MEDIUMTEXT 容纳
+    cover_img = Column(Text().with_variant(MEDIUMTEXT, "mysql"))
+    description = Column(Text)
+    facilities = Column(Text)          # 配套设施，逗号分隔
+    env_score = Column(Float, default=0)      # 环境评分
+    service_score = Column(Float, default=0)  # 服务评分
+    status = Column(String(20), default="on_shelf")  # on_shelf / off_shelf
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    update_time = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    merchant = relationship("User", foreign_keys=[merchant_id])
+
+
+class HotelBooking(Base):
+    __tablename__ = "hotel_bookings"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False)
+    hotel_id = Column(Integer, ForeignKey("hotels.id"), nullable=False)
+    start_date = Column(Date, nullable=False)
+    end_date = Column(Date, nullable=False)
+    days = Column(Integer, default=1)
+    total_price = Column(Float, default=0)
+    status = Column(String(20), default="pending")  # pending / confirm / reject
+    guest_count = Column(Integer, default=1)        # 入住人数
+    remark = Column(String(500))                    # 备注
+    # 关联路线方案（可为空：单独预订酒店）
+    route_id = Column(Integer, ForeignKey("trips.id"), nullable=True)
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    user = relationship("User")
+    hotel = relationship("Hotel")
+
+
+class Room(Base):
+    __tablename__ = "rooms"
+    id = Column(Integer, primary_key=True, index=True)
+    hotel_id = Column(Integer, ForeignKey("hotels.id"), nullable=False, index=True)
+    room_type = Column(String(100), nullable=False)
+    room_price = Column(Float, default=0)
+    bed_info = Column(String(100))
+    max_guest = Column(Integer, default=2)
+    stock = Column(Integer, default=10)
+    # free / occupied / cleaning / maintenance
+    status = Column(String(20), default="free")
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    hotel = relationship("Hotel")
+
+
+class HotelOrder(Base):
+    __tablename__ = "hotel_orders"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"), nullable=False, index=True)
+    hotel_id = Column(Integer, ForeignKey("hotels.id"), nullable=False, index=True)
+    room_id = Column(Integer, ForeignKey("rooms.id"), nullable=True)
+    check_in = Column(Date, nullable=False)
+    check_out = Column(Date, nullable=False)
+    people_count = Column(Integer, default=1)
+    total_price = Column(Float, default=0)
+    pay_channel = Column(String(20))
+    # pending_pay / paid / checked_in / checked_out / cancelled
+    order_status = Column(String(20), default="pending_pay")
+    create_time = Column(DateTime(timezone=True), server_default=func.now())
+    update_time = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+    user = relationship("User")
+    hotel = relationship("Hotel")
+    room = relationship("Room")
+
+
+class GuestRecord(Base):
+    __tablename__ = "guest_records"
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("hotel_orders.id"), nullable=False, index=True)
+    real_name = Column(String(50), nullable=False)
+    id_card = Column(String(30))
+    checkin_time = Column(DateTime(timezone=True), server_default=func.now())
+    order = relationship("HotelOrder")
+
+
+class Bill(Base):
+    __tablename__ = "bills"
+    id = Column(Integer, primary_key=True, index=True)
+    order_id = Column(Integer, ForeignKey("hotel_orders.id"), nullable=False, index=True)
+    amount = Column(Float, default=0)
+    pay_channel = Column(String(20))
+    pay_time = Column(DateTime(timezone=True), server_default=func.now())
+    order = relationship("HotelOrder")

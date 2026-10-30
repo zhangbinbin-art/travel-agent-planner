@@ -11,6 +11,7 @@ const routes = [
       { path: '', name: 'Home', component: () => import('@/views/home/Home.vue') },
       { path: 'spot-detail/:id', name: 'SpotDetail', meta: { keepAlive: false }, component: () => import('@/views/spot/SpotDetail.vue') },
       { path: 'hotel-detail/:id', name: 'HotelDetail', meta: { keepAlive: false }, component: () => import('@/views/hotel/HotelDetail.vue') },
+      { path: 'pay/:orderId', name: 'HotelPay', meta: { keepAlive: false }, component: () => import('@/views/hotel/HotelPay.vue') },
       { path: 'post-list', name: 'PostList', component: () => import('@/views/post/PostList.vue') },
       { path: 'post-detail/:id', name: 'PostDetail', component: () => import('@/views/post/PostDetail.vue') },
       { path: 'post-edit', name: 'PostCreate', component: () => import('@/views/post/PostEdit.vue') },
@@ -32,8 +33,11 @@ const routes = [
     children: [
       { path: '', redirect: '/merchant/dashboard' },
       { path: 'dashboard', name: 'MerchantDashboard', component: () => import('@/views/merchant/MerchantDashboard.vue') },
-      { path: 'hotel-manage', name: 'MerchantHotelManage', component: () => import('@/views/merchant/MerchantHotelManage.vue') },
-      { path: 'booking-list', name: 'MerchantBookingList', component: () => import('@/views/merchant/MerchantBookingList.vue') }
+      { path: 'rooms', name: 'MerchantRooms', component: () => import('@/views/merchant/MerchantRooms.vue') },
+      { path: 'orders', name: 'MerchantOrders', component: () => import('@/views/merchant/MerchantOrders.vue') },
+      { path: 'guests', name: 'MerchantGuests', component: () => import('@/views/merchant/MerchantGuests.vue') },
+      { path: 'bills', name: 'MerchantBills', component: () => import('@/views/merchant/MerchantBills.vue') },
+      { path: 'report', name: 'MerchantReport', component: () => import('@/views/merchant/MerchantReport.vue') }
     ]
   },
   { path: '/login', name: 'Login', component: () => import('@/views/auth/Login.vue') },

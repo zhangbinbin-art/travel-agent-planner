@@ -266,7 +266,7 @@ import { GridComponent, TooltipComponent } from 'echarts/components'
 import { CanvasRenderer } from 'echarts/renderers'
 import api from '@/api'
 import { saveTrip } from '@/api/trip'
-import { createHotelBooking } from '@/api/hotel'
+import { createHotelOrder } from '@/api/hotel'
 import { auth } from '@/utils/auth'
 import HotelPicker from '@/components/hotel/HotelPicker.vue'
 
@@ -812,42 +812,30 @@ const submitBooking = async () => {
   }
   bookingSubmitting.value = true
   try {
-    let routeId = savedTripId.value
-    if (!routeId && routeData.value) {
-      const orderedRouteIds = routeData.value.route.map((s) => s.id)
-      const autoName =
-        (planName.value && planName.value.trim()) ||
-        '智能行程 ' + new Date().toLocaleString('zh-CN')
-      const saved = await saveTrip({
-        name: autoName,
-        spot_ids: orderedRouteIds,
-        start_spot_id: orderedRouteIds[0],
-        days: routeData.value.budget?.days ?? days.value,
-        hotel_per_day: generatedHotelPerDay.value ?? hotelPerDay.value
-      })
-      routeId = saved.data?.id || null
-      savedTripId.value = routeId
-      planName.value = autoName
-      ElMessage.success('已自动保存行程，便于关联预约')
-    }
-
-    const res = await createHotelBooking({
+    const res = await createHotelOrder({
       hotel_id: selectedHotelId.value,
-      start_date: bookingStart.value,
-      end_date: bookingEnd.value,
-      guest_count: guestCount.value,
-      remark: remark.value || undefined,
-      route_id: routeId || null
+      check_in: bookingStart.value,
+      check_out: bookingEnd.value,
+      people_count: guestCount.value
     })
-    ElMessage.success(
-      '预约提交成功，请等待商家确认（' +
-        res.data?.days +
-        ' 天，¥' +
-        formatMoney(res.data?.total_price) +
-        '）'
-    )
+    ElMessage.success('预定成功，正在跳转支付')
+    router.push(`/pay/${res.data.id}`)
   } catch (e) {
-    ElMessage.error(extractError(e, '提交预约失败'))
+    const detail = String(e?.response?.data?.detail || '')
+    if (e?.response?.status === 403 && (detail.includes('实名') || detail.includes('REAL_NAME_REQUIRED'))) {
+      try {
+        await ElMessageBox.confirm(
+          '您还未完成实名认证，请前往个人中心完成实名后再预定酒店',
+          '实名认证提示',
+          { confirmButtonText: '去实名', cancelButtonText: '暂不', type: 'warning' }
+        )
+        router.push({ path: '/user', query: { tab: 'realname' } })
+      } catch (err) {
+        // 用户取消
+      }
+    } else {
+      ElMessage.error(extractError(e, '提交预约失败'))
+    }
   } finally {
     bookingSubmitting.value = false
   }

@@ -2,11 +2,26 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from core.database import get_db
 from api.deps import require_admin
-from models import Post, Comment, User
+from models import Comment, Hotel, HotelBooking, HotelOrder, Post, Room, User
 from schemas.post import PostOut, PostListResponse
 from schemas.comment import CommentOut
 from schemas.admin import PostReview, CommentReview
+from schemas.hotel import (
+    BookingListResponse,
+    HotelCreate,
+    HotelListResponse,
+    HotelOut,
+    HotelStatusUpdate,
+    HotelUpdate,
+    MerchantAuditUpdate,
+    MerchantListResponse,
+    MerchantOut,
+    OrderListResponse,
+)
+from pydantic import BaseModel
+from typing import Optional
 from services import post_service, comment_service
+from services.hotel_service import build_booking_out
 
 router = APIRouter()
 
@@ -90,3 +105,233 @@ def admin_review_comment(
     db.commit()
     db.refresh(comment)
     return comment_service.build_comment_out(comment, db.query(User).filter(User.id == comment.user_id).first(), db=db, current_user=admin)
+
+
+@router.get("/hotel", response_model=HotelListResponse)
+def admin_hotel_list(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    hotels = db.query(Hotel).order_by(Hotel.id.desc()).all()
+    return {"items": hotels, "total": len(hotels)}
+
+
+@router.get("/booking", response_model=BookingListResponse)
+def admin_booking_list(
+    status: str = Query(""),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    query = db.query(HotelBooking)
+    if status:
+        query = query.filter(HotelBooking.status == status)
+    bookings = query.order_by(HotelBooking.id.desc()).all()
+
+    hotel_ids = {b.hotel_id for b in bookings}
+    user_ids = {b.user_id for b in bookings if b.user_id}
+    hotel_map = (
+        {h.id: h for h in db.query(Hotel).filter(Hotel.id.in_(hotel_ids)).all()}
+        if hotel_ids
+        else {}
+    )
+    user_map = (
+        {u.id: u for u in db.query(User).filter(User.id.in_(user_ids)).all()}
+        if user_ids
+        else {}
+    )
+    items = [
+        build_booking_out(b, hotel_map.get(b.hotel_id), user_map.get(b.user_id))
+        for b in bookings
+    ]
+    return {"items": items, "total": len(items)}
+
+
+@router.get("/merchant", response_model=MerchantListResponse)
+def admin_merchant_list(
+    audit_status: str = Query(""),
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    query = db.query(User).filter(User.role == "merchant")
+    if audit_status:
+        query = query.filter(User.audit_status == audit_status)
+    users = query.order_by(User.id.desc()).all()
+    return {"items": users, "total": len(users)}
+
+
+@router.put("/merchant/{uid}/audit", response_model=MerchantOut)
+def admin_audit_merchant(
+    uid: int,
+    payload: MerchantAuditUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    if payload.audit_status not in ("pending", "approved", "rejected"):
+        raise HTTPException(status_code=422, detail="audit_status 只能为 pending/approved/rejected")
+    user = db.query(User).filter(User.id == uid, User.role == "merchant").first()
+    if not user:
+        raise HTTPException(status_code=404, detail="商家不存在")
+    user.audit_status = payload.audit_status
+    db.commit()
+    db.refresh(user)
+    return user
+
+# ---------------------------------------------------------------------------
+# v0.11 管理员统一维护酒店基础资料
+# ---------------------------------------------------------------------------
+
+class MerchantBindRequest(BaseModel):
+    hotel_id: Optional[int] = None
+
+
+def _admin_order_out(order, hotel, room, user):
+    days = (order.check_out - order.check_in).days
+    return {
+        "id": order.id,
+        "user_id": order.user_id,
+        "username": user.username if user else None,
+        "hotel_id": order.hotel_id,
+        "hotel_name": hotel.name if hotel else None,
+        "room_id": order.room_id,
+        "room_type": room.room_type if room else None,
+        "room_price": room.room_price if room else None,
+        "check_in": order.check_in,
+        "check_out": order.check_out,
+        "days": days if days > 0 else 1,
+        "people_count": order.people_count or 1,
+        "total_price": order.total_price,
+        "pay_channel": order.pay_channel,
+        "order_status": order.order_status,
+        "create_time": order.create_time,
+        "start_date": order.check_in,
+        "end_date": order.check_out,
+    }
+
+
+@router.post("/hotel", response_model=HotelOut)
+def admin_create_hotel(
+    payload: HotelCreate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    hotel = Hotel(status="on_shelf", **payload.model_dump())
+    db.add(hotel)
+    db.commit()
+    db.refresh(hotel)
+    return hotel
+
+
+@router.put("/hotel/{hotel_id}", response_model=HotelOut)
+def admin_update_hotel(
+    hotel_id: int,
+    payload: HotelUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    hotel = db.query(Hotel).filter(Hotel.id == hotel_id).first()
+    if not hotel:
+        raise HTTPException(status_code=404, detail="酒店不存在")
+    for key, value in payload.model_dump(exclude_unset=True).items():
+        if value is not None:
+            setattr(hotel, key, value)
+    db.commit()
+    db.refresh(hotel)
+    return hotel
+
+
+@router.put("/hotel/{hotel_id}/status", response_model=HotelOut)
+def admin_hotel_status(
+    hotel_id: int,
+    payload: HotelStatusUpdate,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    try:
+        status = payload.validated()
+    except ValueError:
+        raise HTTPException(status_code=422, detail="status 只能为 on_shelf 或 off_shelf")
+    hotel = db.query(Hotel).filter(Hotel.id == hotel_id).first()
+    if not hotel:
+        raise HTTPException(status_code=404, detail="酒店不存在")
+    hotel.status = status
+    db.commit()
+    db.refresh(hotel)
+    return hotel
+
+
+@router.delete("/hotel/{hotel_id}")
+def admin_delete_hotel(
+    hotel_id: int,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    hotel = db.query(Hotel).filter(Hotel.id == hotel_id).first()
+    if not hotel:
+        raise HTTPException(status_code=404, detail="酒店不存在")
+    if db.query(Room).filter(Room.hotel_id == hotel_id).first() or db.query(HotelOrder).filter(HotelOrder.hotel_id == hotel_id).first():
+        raise HTTPException(status_code=400, detail="该酒店已有客房或订单，建议下架而不是删除")
+    db.delete(hotel)
+    db.commit()
+    return {"message": "删除成功"}
+
+
+@router.get("/order", response_model=OrderListResponse)
+def admin_order_list(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    orders = db.query(HotelOrder).order_by(HotelOrder.id.desc()).all()
+    hotels = {h.id: h for h in db.query(Hotel).all()}
+    rooms = {r.id: r for r in db.query(Room).all()}
+    users = {u.id: u for u in db.query(User).all()}
+    items = [
+        _admin_order_out(o, hotels.get(o.hotel_id), rooms.get(o.room_id), users.get(o.user_id))
+        for o in orders
+    ]
+    return {"items": items, "total": len(items)}
+
+
+@router.put("/merchant/{uid}/bind", response_model=MerchantOut)
+def admin_bind_merchant_hotel(
+    uid: int,
+    payload: MerchantBindRequest,
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    user = db.query(User).filter(User.id == uid, User.role == "merchant").first()
+    if not user:
+        raise HTTPException(status_code=404, detail="商家不存在")
+    if payload.hotel_id is not None:
+        hotel = db.query(Hotel).filter(Hotel.id == payload.hotel_id).first()
+        if not hotel:
+            raise HTTPException(status_code=404, detail="酒店不存在")
+    user.merchant_hotel_id = payload.hotel_id
+    db.commit()
+    db.refresh(user)
+    return user
+
+@router.get("/room")
+def admin_room_list(
+    db: Session = Depends(get_db),
+    admin: User = Depends(require_admin),
+):
+    """管理员查看平台全部客房数据。"""
+    rows = db.query(Room).order_by(Room.hotel_id.asc(), Room.id.asc()).all()
+    hotel_map = {h.id: h.name for h in db.query(Hotel).all()}
+    return {
+        "items": [
+            {
+                "id": r.id,
+                "hotel_id": r.hotel_id,
+                "hotel_name": hotel_map.get(r.hotel_id),
+                "room_type": r.room_type,
+                "room_price": r.room_price,
+                "bed_info": r.bed_info,
+                "max_guest": r.max_guest,
+                "stock": r.stock,
+                "status": r.status,
+            }
+            for r in rows
+        ],
+        "total": len(rows),
+    }
