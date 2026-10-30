@@ -651,9 +651,8 @@ const handleGenerate = async () => {
     return
   }
   generating.value = true
-  routeData.value = null
   try {
-    // 生成时由后端自动挑选酒店并按该酒店单价计算预算；手动切换在生成后本地重算
+    // 直接使用当前表单最新参数请求；成功后覆盖旧行程/nodes/预算，无需先重置
     const res = await api.post('/api/v1/trip/smart-recommend', {
       start_lat: startLat.value === '' ? null : Number(startLat.value),
       start_lng: startLng.value === '' ? null : Number(startLng.value),
@@ -681,9 +680,13 @@ const handleGenerate = async () => {
       ElMessage.warning('暂无匹配酒店，可放宽筛选条件')
     }
     fillBookingDates(res.data?.budget?.days ?? days.value)
-    savePlanCache()
     await nextTick()
-    initChart()
+    try {
+      initChart()
+    } catch (chartError) {
+      console.warn('[Plan] 路线图渲染失败，不影响行程生成:', chartError?.message)
+    }
+    savePlanCache()
   } catch (e) {
     ElMessage.error(extractError(e, '生成智能行程失败'))
   } finally {
@@ -855,68 +858,25 @@ const initChart = () => {
   chartInstance = echarts.init(chartRef.value)
   const route = routeData.value.route || []
   const rawNodes = routeData.value.nodes || []
-  const hotelInfo = selectedHotel.value
 
-  // 按 nodes 顺序构建图数据；酒店节点位置取前后景点中点
-  const sequence = []
-  if (rawNodes.length) {
-    rawNodes.forEach((node) => {
-      if (node.node_type === 'hotel') {
-        if (hotelInfo) sequence.push({ kind: 'hotel', node })
-      } else {
-        sequence.push({ kind: 'spot', node })
-      }
-    })
-  } else {
-    route.forEach((spot) => sequence.push({ kind: 'spot', node: { id: spot.id, name: spot.name } }))
-  }
+  // 路线图只渲染 spot 节点，hotel 节点不参与点位与连线
+  const spotIds = rawNodes
+    .filter((node) => node.node_type === 'spot')
+    .map((node) => node.id)
+  const orderedRoute = spotIds.length
+    ? spotIds.map((id) => route.find((s) => s.id === id)).filter(Boolean)
+    : route.slice()
 
-  const graphNodes = []
+  const graphNodes = orderedRoute.map((spot) => ({
+    name: 'spot-' + spot.id,
+    value: spot.name,
+    x: spot.x,
+    y: spot.y,
+    symbolSize: 16,
+    itemStyle: { color: '#67c23a' },
+    label: { show: true, formatter: spot.name, position: 'right' }
+  }))
   const links = []
-  const coordOf = new Map()
-  route.forEach((spot) => coordOf.set(String(spot.id), { x: spot.x, y: spot.y }))
-
-  sequence.forEach((entry, idx) => {
-    if (entry.kind === 'spot') {
-      const spot = route.find((s) => s.id === entry.node.id)
-      if (!spot) return
-      graphNodes.push({
-        name: 'spot-' + spot.id,
-        value: spot.name,
-        x: spot.x,
-        y: spot.y,
-        symbolSize: 16,
-        itemStyle: { color: '#67c23a' },
-        label: { show: true, formatter: spot.name, position: 'right' }
-      })
-    } else {
-      if (!hotelInfo) return
-      // 取前后景点坐标中点作为酒店位置
-      const prev = sequence[idx - 1]
-      const next = sequence[idx + 1]
-      const prevCoord = prev?.kind === 'spot' ? coordOf.get(String(prev.node.id)) : null
-      const nextCoord = next?.kind === 'spot' ? coordOf.get(String(next.node.id)) : null
-      let pos = { x: 300, y: 300 }
-      if (prevCoord && nextCoord) {
-        pos = { x: (prevCoord.x + nextCoord.x) / 2, y: (prevCoord.y + nextCoord.y) / 2 }
-      } else if (prevCoord) {
-        pos = { x: prevCoord.x + 20, y: prevCoord.y + 20 }
-      } else if (nextCoord) {
-        pos = { x: nextCoord.x - 20, y: nextCoord.y - 20 }
-      }
-      graphNodes.push({
-        name: 'hotel-' + hotelInfo.id,
-        value: hotelInfo.name,
-        x: pos.x,
-        y: pos.y,
-        symbol: 'diamond',
-        symbolSize: 14,
-        itemStyle: { color: '#409eff' },
-        label: { show: true, formatter: hotelInfo.name, position: 'right' }
-      })
-    }
-  })
-
   for (let i = 0; i < graphNodes.length - 1; i += 1) {
     links.push({ source: graphNodes[i].name, target: graphNodes[i + 1].name })
   }
@@ -998,12 +958,7 @@ const handleSave = async () => {
   }
 }
 
-// 手动切换酒店时同步刷新路线图中的酒店节点
-watch(selectedHotel, () => {
-  if (routeData.value) {
-    nextTick(() => initChart())
-  }
-})
+// 路线图只画景点，手动切换酒店无需重绘地图（列表与预算由 timeline/refreshBudgetHotel 更新）
 
 onBeforeRouteLeave((to) => {
   leftToDetail = to.name === 'SpotDetail' || to.name === 'HotelDetail'

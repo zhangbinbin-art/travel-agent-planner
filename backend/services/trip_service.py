@@ -821,43 +821,25 @@ def smart_recommend(db: Session, payload) -> dict:
         effective_hotel_price = float(auto_hotel.get("price") or 0)
     budget = compute_budget(route, safe_days, total_distance, effective_hotel_price)
 
-    # 节点组装：1天且≤2景点 -> 景点1、景点2、酒店；其余 -> 景点1、酒店、景点2、酒店……
+    # 节点组装：按天分组，先排当天全部景点，末尾只追加 1 次当天酒店
     route_map = {item.id: item for item in route}
-    total_spots = len(ordered_route)
-    compact_single_day = safe_days == 1 and total_spots <= 2
     nodes = []
     for plan in day_plans:
         day_spots = [route_map[i] for i in plan["spot_ids"] if i in route_map]
-        if compact_single_day:
-            for spot in day_spots:
-                nodes.append(
-                    {"node_type": "spot", "id": spot.id, "name": spot.name, "score": spot.score, "day": plan["day"]}
-                )
-            if auto_hotel is not None:
-                nodes.append(
-                    {
-                        "node_type": "hotel",
-                        "id": auto_hotel["hotel_id"],
-                        "name": auto_hotel["hotel_name"],
-                        "score": None,
-                        "day": plan["day"],
-                    }
-                )
-        else:
-            for spot in day_spots:
-                nodes.append(
-                    {"node_type": "spot", "id": spot.id, "name": spot.name, "score": spot.score, "day": plan["day"]}
-                )
-                if auto_hotel is not None:
-                    nodes.append(
-                        {
-                            "node_type": "hotel",
-                            "id": auto_hotel["hotel_id"],
-                            "name": auto_hotel["hotel_name"],
-                            "score": None,
-                            "day": plan["day"],
-                        }
-                    )
+        for spot in day_spots:
+            nodes.append(
+                {"node_type": "spot", "id": spot.id, "name": spot.name, "score": spot.score, "day": plan["day"]}
+            )
+        if auto_hotel is not None:
+            nodes.append(
+                {
+                    "node_type": "hotel",
+                    "id": auto_hotel["hotel_id"],
+                    "name": auto_hotel["hotel_name"],
+                    "score": None,
+                    "day": plan["day"],
+                }
+            )
 
     daily_hotels = []
     if auto_hotel is not None:
