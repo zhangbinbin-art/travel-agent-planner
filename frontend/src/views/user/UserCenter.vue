@@ -30,20 +30,50 @@
       </el-form>
     </el-card>
 
-    <el-card>
-      <template #header>个人中心</template>
-      <el-tabs v-model="active">
-        <el-tab-pane label="我的收藏" name="collect">
-          <el-empty description="请前往“我的收藏”菜单查看" />
+    <el-card class="hub-card">
+      <template #header>
+        <div class="card-header">
+          <span class="card-title">个人中心</span>
+        </div>
+      </template>
+
+      <el-tabs v-model="active" class="hub-tabs">
+        <el-tab-pane label="我的收藏" name="collect" lazy>
+          <div class="embedded-pane">
+            <MyFavorite />
+          </div>
         </el-tab-pane>
-        <el-tab-pane label="我的行程" name="trip">
-          <el-empty description="请前往“我的路线”菜单查看" />
+
+        <el-tab-pane label="我的行程" name="trip" lazy>
+          <div class="embedded-pane">
+            <MyPlan />
+          </div>
         </el-tab-pane>
-        <el-tab-pane label="我的帖子" name="post">
-          <el-empty description="暂无帖子" />
+
+        <el-tab-pane label="我的酒店预约" name="booking" lazy>
+          <div class="embedded-pane">
+            <MyBooking />
+          </div>
         </el-tab-pane>
-        <el-tab-pane label="我的评论" name="comment">
-          <el-empty description="暂无评论" />
+
+        <el-tab-pane label="我的帖子" name="post" lazy>
+          <!-- TODO(backend): GET /api/v1/user/posts 提供后，用真实帖子列表替换此处空态。 -->
+          <div class="embedded-pane">
+            <EmptyState description="暂无帖子" hint="你发布的游记会显示在这里" />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="我的评论" name="comment" lazy>
+          <!-- TODO(backend): GET /api/v1/user/comments 提供后，用真实评论列表替换此处空态。 -->
+          <div class="embedded-pane">
+            <EmptyState description="暂无评论" hint="你在游记下的评论会显示在这里" />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="我点赞的帖子" name="like" lazy>
+          <div class="embedded-pane">
+            <MyLikePost />
+          </div>
         </el-tab-pane>
       </el-tabs>
     </el-card>
@@ -51,17 +81,33 @@
 </template>
 
 <script setup>
-import { reactive, ref, computed, onMounted } from 'vue'
+import { reactive, ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getProfile, submitRealName } from '@/api/hotel'
+import MyFavorite from '@/views/user/MyFavorite.vue'
+import MyPlan from '@/views/user/MyPlan.vue'
+import MyBooking from '@/views/user/MyBooking.vue'
+import MyLikePost from '@/views/user/MyLikePost.vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const route = useRoute()
 const router = useRouter()
-const active = ref('collect')
+
+const TAB_NAMES = ['collect', 'trip', 'booking', 'post', 'comment', 'like']
+const initialTab = TAB_NAMES.includes(route.query.tab) ? route.query.tab : 'collect'
+
+const active = ref(initialTab)
 const profile = ref({})
 const submitting = ref(false)
 const form = reactive({ real_name: '', id_card: '' })
+
+// 仅当 tab 真正变化时同步到 URL，保留 ?tab=，且永不写入 realname
+watch(active, (val) => {
+  if (!TAB_NAMES.includes(val)) return
+  if (route.query.tab === val) return
+  router.replace({ query: { ...route.query, tab: val } })
+})
 
 const maskedIdCard = computed(() => {
   const id = profile.value.id_card || ''
@@ -111,7 +157,7 @@ onMounted(() => {
 .user-center {
   display: flex;
   flex-direction: column;
-  gap: 16px;
+  gap: 20px;
 }
 .card-header {
   display: flex;
@@ -143,5 +189,57 @@ onMounted(() => {
   margin-left: 12px;
   color: #909399;
   font-size: 12px;
+}
+
+/* 个人中心 Hub 卡片 */
+.hub-card {
+  border-radius: 12px;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+}
+.hub-card :deep(.el-card__body) {
+  padding-top: 12px;
+}
+
+/* 标签栏：15px 标签，窄屏可横向滚动不换行 */
+.hub-tabs :deep(.el-tabs__header) {
+  margin-bottom: 20px;
+}
+.hub-tabs :deep(.el-tabs__nav-wrap) {
+  overflow-x: auto;
+  overflow-y: hidden;
+}
+.hub-tabs :deep(.el-tabs__item) {
+  font-size: 15px;
+  white-space: nowrap;
+}
+.hub-tabs :deep(.el-tabs__item.is-active) {
+  color: #2c3e50;
+  font-weight: 700;
+}
+.hub-tabs :deep(.el-tabs__active-bar) {
+  background-color: #409eff;
+}
+
+/* 内嵌组件外层卡片扁平化，避免卡片套卡片 */
+.hub-tabs :deep(.my-plan > .el-card),
+.hub-tabs :deep(.my-booking > .el-card),
+.hub-tabs :deep(.my-favorite > .el-card) {
+  border: none;
+  box-shadow: none;
+  background: transparent;
+}
+.hub-tabs :deep(.my-plan > .el-card > .el-card__body),
+.hub-tabs :deep(.my-booking > .el-card > .el-card__body),
+.hub-tabs :deep(.my-favorite > .el-card > .el-card__body) {
+  padding: 0;
+}
+.hub-tabs :deep(.my-plan > .el-card > .el-card__header),
+.hub-tabs :deep(.my-booking > .el-card > .el-card__header),
+.hub-tabs :deep(.my-favorite > .el-card > .el-card__header) {
+  padding: 0 0 14px;
+  border-bottom: 1px solid #f0f0f0;
+}
+.embedded-pane {
+  padding: 4px 0;
 }
 </style>

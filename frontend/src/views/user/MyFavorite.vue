@@ -7,36 +7,47 @@
         </div>
       </template>
 
-      <div v-loading="loading">
-        <el-row v-if="favorites.length" :gutter="16">
-          <el-col v-for="item in favorites" :key="item.id" :xs="24" :sm="12" :md="8" class="favorite-col">
-            <el-card shadow="hover" class="favorite-card" @click="goDetail(item.spot_id)">
-              <div class="favorite-title">{{ getSpot(item).name || '未命名景点' }}</div>
-              <div class="favorite-city">{{ getSpot(item).city }}</div>
-              <div v-if="tagList(item).length" class="favorite-tags">
-                <el-tag v-for="tag in tagList(item)" :key="tag" size="small">{{ tag }}</el-tag>
-              </div>
-              <div class="favorite-desc">{{ excerpt(item) }}</div>
-              <div class="favorite-score">{{ getSpot(item).score }} 分</div>
-              <div class="favorite-actions">
-                <el-button size="small" @click.stop="goDetail(item.spot_id)">详情</el-button>
-                <el-button
-                  size="small"
-                  type="danger"
-                  plain
-                  :loading="removingId === item.spot_id"
-                  @click.stop="handleRemove(item)"
-                >
-                  取消收藏
-                </el-button>
-              </div>
-            </el-card>
-          </el-col>
-        </el-row>
-        <el-empty v-else-if="!loading" description="还没有收藏的景点">
-          <el-button type="primary" @click="goSpotList">去逛逛</el-button>
-        </el-empty>
-      </div>
+      <el-tabs v-model="activeType" class="favorite-tabs">
+        <el-tab-pane label="收藏景点" name="spot">
+          <div v-loading="loading" class="favorite-pane">
+            <el-row v-if="favorites.length" :gutter="16">
+              <el-col v-for="item in favorites" :key="item.id" :xs="24" :sm="12" :md="8" class="favorite-col">
+                <el-card shadow="hover" class="favorite-card" @click="goDetail(item.spot_id)">
+                  <div class="favorite-title">{{ getSpot(item).name || '未命名景点' }}</div>
+                  <div class="favorite-city">{{ getSpot(item).city }}</div>
+                  <div v-if="tagList(item).length" class="favorite-tags">
+                    <el-tag v-for="tag in tagList(item)" :key="tag" size="small">{{ tag }}</el-tag>
+                  </div>
+                  <div class="favorite-desc">{{ excerpt(item) }}</div>
+                  <div class="favorite-score">{{ getSpot(item).score }} 分</div>
+                  <div class="favorite-actions">
+                    <el-button size="small" @click.stop="goDetail(item.spot_id)">详情</el-button>
+                    <el-button
+                      size="small"
+                      type="danger"
+                      plain
+                      :loading="removingId === item.spot_id"
+                      @click.stop="handleRemove(item)"
+                    >
+                      取消收藏
+                    </el-button>
+                  </div>
+                </el-card>
+              </el-col>
+            </el-row>
+            <el-empty v-else-if="!loading" description="还没有收藏的景点">
+              <el-button type="primary" @click="goHome">去逛逛</el-button>
+            </el-empty>
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="收藏游记" name="post">
+          <!-- TODO(backend): GET /api/v1/user/favorite-posts 提供后，用真实游记收藏列表替换此处空态。 -->
+          <div class="favorite-pane">
+            <EmptyState description="暂无收藏游记" hint="在游记详情页点击收藏即可加入" />
+          </div>
+        </el-tab-pane>
+      </el-tabs>
     </el-card>
   </div>
 </template>
@@ -47,9 +58,11 @@ import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { getMyFavoriteSpots, toggleFavorite } from '@/api/favorite'
 import { auth } from '@/utils/auth'
+import EmptyState from '@/components/EmptyState.vue'
 
 const router = useRouter()
 
+const activeType = ref('spot')
 const favorites = ref([])
 const loading = ref(false)
 const removingId = ref(null)
@@ -125,8 +138,9 @@ const goDetail = (spotId) => {
   router.push(`/spot-detail/${spotId}`)
 }
 
-const goSpotList = () => {
-  router.push('/spot-list')
+// 景点列表页已移除，改为回首页浏览景点
+const goHome = () => {
+  router.push('/')
 }
 
 onMounted(() => {
@@ -142,6 +156,19 @@ onMounted(() => {
 }
 .card-title {
   font-weight: 600;
+}
+.favorite-tabs :deep(.el-tabs__header) {
+  margin-bottom: 18px;
+}
+.favorite-tabs :deep(.el-tabs__item) {
+  font-size: 14px;
+}
+.favorite-tabs :deep(.el-tabs__item.is-active) {
+  color: #2c3e50;
+  font-weight: 600;
+}
+.favorite-pane {
+  padding-top: 4px;
 }
 .favorite-col {
   margin-bottom: 16px;

@@ -20,6 +20,7 @@ const routes = [
       { path: 'user/my-plan', name: 'MyPlan', component: () => import('@/views/user/MyPlan.vue') },
       { path: 'user/my-favorite', name: 'MyFavorite', component: () => import('@/views/user/MyFavorite.vue') },
       { path: 'user/my-booking', name: 'MyBooking', component: () => import('@/views/user/MyBooking.vue') },
+      { path: 'user/my-like-post', name: 'MyLikePost', component: () => import('@/views/user/MyLikePost.vue') },
       { path: 'plan', name: 'Plan', meta: { keepAlive: true }, component: () => import('@/views/plan/Plan.vue') },
       { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') },
       { path: 'admin/post-review', name: 'AdminPostReview', component: () => import('@/views/admin/PostReview.vue') },
