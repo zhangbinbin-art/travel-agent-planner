@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from core.database import get_db
-from api.deps import get_current_user, require_admin
+from api.deps import get_current_user, require_admin, require_any_auth
 from models import User, Spot
 from schemas.spot import SpotCreate, SpotUpdate, SpotOut, SpotListResponse
 from services import spot_service
@@ -15,13 +15,14 @@ def list_spots(
     page: int = Query(1, ge=1),
     page_size: int = Query(10, ge=1, le=100),
     db: Session = Depends(get_db),
+    current_user: User = Depends(require_any_auth),
 ):
     result = spot_service.get_spots(db, keyword=keyword, page=page, page_size=page_size)
     return result
 
 
 @router.get("/{spot_id}", response_model=SpotOut)
-def get_spot(spot_id: int, db: Session = Depends(get_db)):
+def get_spot(spot_id: int, db: Session = Depends(get_db), current_user: User = Depends(require_any_auth)):
     spot = spot_service.get_spot_by_id(db, spot_id)
     if not spot:
         raise HTTPException(status_code=404, detail="景点不存在")

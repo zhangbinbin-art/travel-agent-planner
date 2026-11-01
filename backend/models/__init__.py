@@ -50,6 +50,8 @@ class Post(Base):
     title = Column(String(150), nullable=False)
     content = Column(Text)
     cover = Column(String(255))
+    images = Column(Text, default="[]")
+    custom_spots = Column(Text, default="[]")
     spot_ids = Column(Text, default="[]")
     view_count = Column(Integer, default=0)
     like_count = Column(Integer, default=0)
@@ -100,6 +102,14 @@ class Favorite(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     spot = relationship("Spot")
     __table_args__ = (UniqueConstraint("user_id", "spot_id", name="uq_favorite_user_spot"),)
+
+class PostFavorite(Base):
+    __tablename__ = "post_favorites"
+    id = Column(Integer, primary_key=True, index=True)
+    user_id = Column(Integer, ForeignKey("users.id"))
+    post_id = Column(Integer, ForeignKey("posts.id"))
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    __table_args__ = (UniqueConstraint("user_id", "post_id", name="uq_post_favorite_user_post"),)
 
 class Trip(Base):
     __tablename__ = "trips"

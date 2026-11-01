@@ -10,6 +10,8 @@ class PostCreate(BaseModel):
     content: Optional[str] = None
     cover: Optional[str] = None
     spot_ids: Optional[List[int]] = None
+    images: Optional[List[str]] = None
+    custom_spots: Optional[List[str]] = None
 
 
 class PostUpdate(BaseModel):
@@ -17,6 +19,8 @@ class PostUpdate(BaseModel):
     content: Optional[str] = None
     cover: Optional[str] = None
     spot_ids: Optional[List[int]] = None
+    images: Optional[List[str]] = None
+    custom_spots: Optional[List[str]] = None
 
 
 class SpotBrief(BaseModel):
@@ -31,7 +35,9 @@ class PostOut(BaseModel):
     title: str
     content: Optional[str] = None
     cover: Optional[str] = None
+    images: List[str] = []
     spot_ids: List[int] = []
+    custom_spots: List[str] = []
     spots: List[SpotBrief] = []
     view_count: int = 0
     like_count: int = 0
@@ -40,6 +46,8 @@ class PostOut(BaseModel):
     status: int = 0
     status_text: str = ""
     liked: bool = False
+    favorited: bool = False
+    favorite_count: int = 0
     created_at: Optional[datetime] = None
     updated_at: Optional[datetime] = None
     author: Optional[UserBrief] = None

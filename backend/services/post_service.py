@@ -1,7 +1,7 @@
 import json
 from datetime import datetime
 from sqlalchemy.orm import Session
-from models import Post, Spot, PostLike, Comment, CommentLike, User
+from models import Post, Spot, PostLike, Comment, CommentLike, User, PostFavorite
 from typing import Optional
 
 
@@ -35,6 +35,82 @@ def _dump_spot_ids(spot_ids_list):
         return "[]"
 
 
+def _parse_images(raw):
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    result = []
+    for x in data:
+        if isinstance(x, str):
+            item = x.strip()
+            if item:
+                result.append(item)
+    return result
+
+
+def _dump_images(images):
+    if not images:
+        return "[]"
+    try:
+        cleaned = []
+        for x in images:
+            if not isinstance(x, str):
+                continue
+            item = x.strip()
+            if not item or item in cleaned:
+                continue
+            cleaned.append(item)
+            if len(cleaned) >= 9:
+                break
+        return json.dumps(cleaned)
+    except Exception:
+        return "[]"
+
+
+def _parse_custom_spots(raw):
+    if not raw:
+        return []
+    try:
+        data = json.loads(raw)
+    except Exception:
+        return []
+    if not isinstance(data, list):
+        return []
+    result = []
+    for x in data:
+        if isinstance(x, str):
+            item = x.strip()
+            if item and item not in result:
+                result.append(item)
+        if len(result) >= 10:
+            break
+    return result
+
+
+def _dump_custom_spots(items):
+    if not items:
+        return "[]"
+    try:
+        cleaned = []
+        for x in items:
+            if not isinstance(x, str):
+                continue
+            item = x.strip()
+            if not item or item in cleaned:
+                continue
+            cleaned.append(item)
+            if len(cleaned) >= 10:
+                break
+        return json.dumps(cleaned, ensure_ascii=False)
+    except Exception:
+        return "[]"
+
+
 def recompute_heat(post: Post):
     post.heat = int((post.like_count or 0) * 2 + (post.view_count or 0) + (post.comment_count or 0) * 2)
     return post.heat
@@ -55,13 +131,27 @@ def build_post_out(post: Post, db: Session = None, current_user: User = None) ->
     if db is not None and current_user is not None and getattr(current_user, "id", None):
         liked = db.query(PostLike).filter(PostLike.user_id == current_user.id, PostLike.post_id == post.id).first() is not None
     status = getattr(post, "status", 0) or 0
+    images = _parse_images(getattr(post, "images", "[]"))
+    favorited = False
+    if db is not None and current_user is not None and getattr(current_user, "id", None):
+        favorited = (
+            db.query(PostFavorite)
+            .filter(PostFavorite.user_id == current_user.id, PostFavorite.post_id == post.id)
+            .first()
+            is not None
+        )
+    favorite_count = 0
+    if db is not None:
+        favorite_count = db.query(PostFavorite).filter(PostFavorite.post_id == post.id).count()
     return {
         "id": post.id,
         "user_id": post.user_id,
         "title": post.title,
         "content": post.content,
         "cover": getattr(post, "cover", None),
+        "images": images,
         "spot_ids": spot_ids,
+        "custom_spots": _parse_custom_spots(getattr(post, "custom_spots", "[]")),
         "spots": spots,
         "view_count": int(getattr(post, "view_count", 0) or 0),
         "like_count": int(getattr(post, "like_count", 0) or 0),
@@ -70,6 +160,8 @@ def build_post_out(post: Post, db: Session = None, current_user: User = None) ->
         "status": status,
         "status_text": STATUS_TEXT.get(status, str(status)),
         "liked": bool(liked),
+        "favorited": bool(favorited),
+        "favorite_count": int(favorite_count),
         "created_at": getattr(post, "created_at", None),
         "updated_at": getattr(post, "updated_at", None),
         "author": (
@@ -142,6 +234,17 @@ def create_post(db: Session, user_id: int, data: dict):
         post_data["spot_ids"] = _dump_spot_ids(post_data["spot_ids"])
     else:
         post_data["spot_ids"] = "[]"
+    images = post_data.pop("images", None)
+    if images is not None:
+        dumped_images = _dump_images(images)
+        parsed_images = _parse_images(dumped_images)
+        post_data["images"] = dumped_images
+        if not post_data.get("cover") and parsed_images:
+            post_data["cover"] = parsed_images[0]
+    else:
+        post_data["images"] = "[]"
+    custom_spots = post_data.pop("custom_spots", None)
+    post_data["custom_spots"] = _dump_custom_spots(custom_spots)
     post_data["status"] = 0
     post_data["view_count"] = 0
     post_data["like_count"] = 0
@@ -161,6 +264,21 @@ def update_post(db: Session, post: Post, data: dict, is_admin: bool = False):
             post_data.pop("spot_ids")
         else:
             post_data["spot_ids"] = _dump_spot_ids(post_data["spot_ids"])
+    if "images" in post_data:
+        images = post_data.pop("images")
+        if images is not None:
+            dumped_images = _dump_images(images)
+            parsed_images = _parse_images(dumped_images)
+            post_data["images"] = dumped_images
+            effective_cover = post_data.get("cover", post.cover)
+            if not effective_cover and parsed_images:
+                post_data["cover"] = parsed_images[0]
+    if "custom_spots" in post_data:
+        custom_spots = post_data.pop("custom_spots")
+        if custom_spots is None:
+            pass
+        else:
+            post_data["custom_spots"] = _dump_custom_spots(custom_spots)
     for key, value in post_data.items():
         setattr(post, key, value)
     if not is_admin:

@@ -2,7 +2,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from core.database import get_db
 from api.deps import get_current_user
-from models import User, Post, Comment
+from models import User, Post, Comment, PostFavorite
 from schemas.post import (
     PostCreate,
     PostUpdate,
@@ -54,12 +54,12 @@ def list_posts(
     status: str = Query(""),
     spot_id: int = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     if sort not in ("latest", "hot"):
         sort = "latest"
     status_filter = None
-    if current_user is None or getattr(current_user, "role", "user") != "admin":
+    if getattr(current_user, "role", "user") != "admin":
         status_filter = 1
     else:
         if status != "":
@@ -87,14 +87,12 @@ def list_posts(
 
 
 @router.get("/{post_id}", response_model=PostDetailOut)
-def get_post(post_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user_optional)):
+def get_post(post_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     post = post_service.get_post_by_id(db, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="游记不存在")
     status = getattr(post, "status", 0) or 0
     if status != 1:
-        if current_user is None:
-            raise HTTPException(status_code=404, detail="游记不存在")
         if getattr(current_user, "role", "user") != "admin" and current_user.id != post.user_id:
             raise HTTPException(status_code=404, detail="游记不存在")
     post.view_count = int(post.view_count or 0) + 1
@@ -103,9 +101,7 @@ def get_post(post_id: int, db: Session = Depends(get_db), current_user: User = D
     db.refresh(post)
     data = post_service.build_post_out(post, db=db, current_user=current_user)
     comments = comment_service.get_comments_by_post(db, post_id, current_user=current_user)
-    if current_user is None:
-        comments = [c for c in comments if c.get("status") == 1]
-    elif getattr(current_user, "role", "user") == "admin":
+    if getattr(current_user, "role", "user") == "admin":
         pass
     else:
         filtered = []
@@ -182,6 +178,49 @@ def like_post(
     return res
 
 
+@router.post("/{post_id}/favorite")
+def toggle_post_favorite(
+    post_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    post = post_service.get_post_by_id(db, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="游记不存在")
+    existing = (
+        db.query(PostFavorite)
+        .filter(PostFavorite.user_id == current_user.id, PostFavorite.post_id == post_id)
+        .first()
+    )
+    if existing:
+        db.delete(existing)
+        db.commit()
+        favorited = False
+        message = "已取消收藏"
+    else:
+        try:
+            db.add(PostFavorite(user_id=current_user.id, post_id=post_id))
+            db.commit()
+            favorited = True
+            message = "收藏成功"
+        except Exception:
+            db.rollback()
+            favorited = (
+                db.query(PostFavorite)
+                .filter(PostFavorite.user_id == current_user.id, PostFavorite.post_id == post_id)
+                .first()
+                is not None
+            )
+            message = "收藏成功" if favorited else "已取消收藏"
+    favorite_count = db.query(PostFavorite).filter(PostFavorite.post_id == post_id).count()
+    return {
+        "favorited": favorited,
+        "post_id": post_id,
+        "favorite_count": favorite_count,
+        "message": message,
+    }
+
+
 @router.post("/{post_id}/comment", response_model=CommentOut)
 def create_comment_on_post(
     post_id: int,
@@ -205,15 +244,13 @@ def comment_list(
     page_size: int = Query(10, ge=1, le=100),
     status: str = Query(""),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user_optional),
+    current_user: User = Depends(get_current_user),
 ):
     post = post_service.get_post_by_id(db, post_id)
     if not post:
         raise HTTPException(status_code=404, detail="游记不存在")
     query = db.query(Comment).filter(Comment.post_id == post_id)
-    if current_user is None:
-        query = query.filter(Comment.status == 1)
-    elif getattr(current_user, "role", "user") == "admin":
+    if getattr(current_user, "role", "user") == "admin":
         if status != "":
             try:
                 s = int(status)
