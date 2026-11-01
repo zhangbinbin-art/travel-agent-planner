@@ -37,9 +37,6 @@
               >
                 {{ activeDest }} ×
               </el-tag>
-              <el-button link type="primary" size="small" @click="openCityDialog">
-                查看全部地区
-              </el-button>
             </div>
           </div>
 
@@ -74,10 +71,6 @@
               </el-tag>
             </div>
           </div>
-
-          <div class="filter-section-actions">
-            <el-button type="primary" @click="handleRecommend">推荐发现</el-button>
-          </div>
         </section>
 
         <!-- Tab 切换 -->
@@ -109,9 +102,8 @@
             <div class="section-actions">
               <el-button
                 v-if="activeTab === 'recommend'"
+                link
                 type="primary"
-                plain
-                size="small"
                 @click="activeTab = 'all'"
               >
                 查看全部景点
@@ -202,23 +194,6 @@
         </section>
       </main>
     </div>
-
-    <el-dialog v-model="cityDialogVisible" title="选择目的地" width="520px" append-to-body>
-      <el-input v-model="cityKeyword" placeholder="搜索城市" clearable class="city-search" />
-      <div class="city-list">
-        <el-tag
-          v-for="city in filteredCities"
-          :key="city"
-          :type="activeDest === city ? 'primary' : 'info'"
-          :effect="activeDest === city ? 'dark' : 'plain'"
-          class="city-tag"
-          @click="pickCity(city)"
-        >
-          {{ city }}
-        </el-tag>
-      </div>
-      <el-empty v-if="!filteredCities.length" description="没有匹配的城市" :image-size="80" />
-    </el-dialog>
   </div>
 </template>
 
@@ -232,9 +207,6 @@ const router = useRouter()
 const hotDest = ['北京', '上海', '杭州', '广州', '桂林', '厦门']
 const themes = ['自然风景', '历史古迹', '城市观光', '主题乐园']
 const hotSpotTags = ['西湖景区', '故宫博物院', '外滩']
-
-const cityDialogVisible = ref(false)
-const cityKeyword = ref('')
 
 const activeTab = ref('recommend')
 const activeDest = ref('')
@@ -265,39 +237,28 @@ const fetchSpots = async () => {
 
 onMounted(fetchSpots)
 
-// 全部城市（从景点接口数据去重），供“查看全部地区”弹窗使用
-const cityOptions = computed(() => {
-  const set = new Set()
-  allSpots.value.forEach((s) => {
-    if (s.city) set.add(s.city)
-  })
-  return Array.from(set)
-})
-
-const filteredCities = computed(() => {
-  const list = [...cityOptions.value].sort((a, b) => String(a).localeCompare(String(b), 'zh-CN'))
-  const kw = cityKeyword.value.trim().toLowerCase()
-  if (!kw) return list
-  return list.filter((c) => String(c).toLowerCase().includes(kw))
-})
-
-const openCityDialog = () => {
-  cityKeyword.value = ''
-  cityDialogVisible.value = true
-}
-
-const pickCity = (city) => {
-  setDest(city)
-  cityDialogVisible.value = false
-}
-
+// 检索框关键词优先：清空关键词后，顶部标签才重新参与筛选
 const filteredSpots = computed(() => {
-  let list = allSpots.value.slice()
+  const list = allSpots.value.slice()
+  const kw = appliedKeyword.value.trim().toLowerCase()
+
+  // ① 有检索关键词时，只按关键词过滤，顶部标签筛选不参与
+  if (kw) {
+    return list.filter(
+      (s) =>
+        (s.name || '').toLowerCase().includes(kw) || (s.city || '').toLowerCase().includes(kw)
+    )
+  }
+
+  // ② 检索框为空时，才使用顶部标签组合筛选
+  let result = list
   if (activeDest.value) {
-    list = list.filter((s) => s.city === activeDest.value || s.city?.includes(activeDest.value))
+    result = result.filter(
+      (s) => s.city === activeDest.value || s.city?.includes(activeDest.value)
+    )
   }
   if (activeThemes.value.length) {
-    list = list.filter((s) =>
+    result = result.filter((s) =>
       activeThemes.value.some(
         (theme) =>
           s.theme === theme ||
@@ -307,39 +268,47 @@ const filteredSpots = computed(() => {
     )
   }
   if (activeSpotName.value) {
-    list = list.filter((s) => (s.name || '').includes(activeSpotName.value))
+    result = result.filter((s) => (s.name || '').includes(activeSpotName.value))
   }
-  if (appliedKeyword.value) {
-    const kw = appliedKeyword.value.toLowerCase()
-    list = list.filter(
-      (s) =>
-        (s.name || '').toLowerCase().includes(kw) || (s.city || '').toLowerCase().includes(kw)
-    )
-  }
-  return list
+  return result
 })
 
 const displayList = computed(() => filteredSpots.value.slice(0, 8))
 const rankList = computed(() => filteredSpots.value.slice(0, 6))
 const allGridList = computed(() => filteredSpots.value)
 
+// 清空检索框（点击顶部标签时调用，保证标签筛选立即生效）
+// 返回是否清掉了已生效的检索词——若清掉了，需要重新拉取未过滤的全量列表
+const clearKeyword = () => {
+  const hadKeyword = !!appliedKeyword.value
+  keyword.value = ''
+  appliedKeyword.value = ''
+  return hadKeyword
+}
+
 const setDest = (item) => {
+  if (clearKeyword()) fetchSpots()
   activeDest.value = activeDest.value === item ? '' : item
 }
 const toggleTheme = (item) => {
+  if (clearKeyword()) fetchSpots()
   const idx = activeThemes.value.indexOf(item)
   if (idx >= 0) activeThemes.value.splice(idx, 1)
   else activeThemes.value.push(item)
 }
 const setHotTag = (item) => {
+  if (clearKeyword()) fetchSpots()
   activeSpotName.value = activeSpotName.value === item ? '' : item
 }
-const handleRecommend = () => {
-  activeTab.value = 'recommend'
-  fetchSpots()
-}
 const handleSearch = () => {
-  appliedKeyword.value = keyword.value.trim()
+  const kw = keyword.value.trim()
+  appliedKeyword.value = kw
+  // 检索关键词优先级最高：一旦检索，清空顶部所有标签选中状态
+  if (kw) {
+    activeDest.value = ''
+    activeThemes.value = []
+    activeSpotName.value = ''
+  }
   fetchSpots()
 }
 const resetFilters = () => {
@@ -370,70 +339,90 @@ const goDetail = (id) => {
   min-width: 0;
 }
 .banner {
-  border-radius: 8px;
+  border-radius: 12px;
   overflow: hidden;
   margin-bottom: 16px;
 }
+/* 轻量化筛选条：三组标签横向紧凑排布，放不下自动换行 */
 .filter-section {
-  background: #fff;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  padding: 16px 18px;
-  margin-bottom: 16px;
-}
-.filter-section-head {
-  margin-bottom: 8px;
-}
-.filter-section-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
-}
-.filter-row {
-  display: flex;
-  align-items: flex-start;
-  gap: 12px;
-  padding: 10px 0;
-  border-top: 1px dashed #f0f0f0;
-}
-.filter-row:first-of-type {
-  border-top: none;
-}
-.filter-row-label {
-  width: 84px;
-  flex-shrink: 0;
-  color: #606266;
-  font-weight: 600;
-  font-size: 14px;
-  line-height: 24px;
-}
-.filter-row-content {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: 8px;
+  gap: 10px 18px;
+  background: #fff;
+  border: none;
+  border-radius: 12px;
+  padding: 12px 16px;
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.03);
+  margin-bottom: 10px;
 }
-.filter-tag {
-  cursor: pointer;
-  border-radius: 4px;
+.filter-section-head {
+  margin: 0;
 }
-.filter-section-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 8px;
+.filter-section-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #2c3e50;
 }
-.city-search {
-  margin-bottom: 12px;
-}
-.city-list {
-  display: flex;
+.filter-row {
+  display: inline-flex;
+  align-items: center;
   flex-wrap: wrap;
   gap: 8px;
-  max-height: 300px;
-  overflow: auto;
+  padding: 0;
+  border: none;
 }
-.city-tag {
+/* 分组标题加重、与标签拉开视觉层级 */
+.filter-row-label {
+  color: #2c3e50;
+  font-weight: 600;
+  font-size: 14px;
+  line-height: 26px;
+  white-space: nowrap;
+  margin-right: 2px;
+  padding-right: 6px;
+}
+.filter-row-content {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+/* 标签统一为浅色胶囊，选中态（el-tag--dark）为蓝色实底 */
+.filter-tag.el-tag {
+  height: auto;
+  padding: 4px 10px;
+  line-height: 1.4;
+  font-size: 13px;
+  border-radius: 6px;
   cursor: pointer;
+  transition: all 0.2s ease;
+}
+.filter-tag.el-tag:not(.el-tag--dark) {
+  --el-tag-bg-color: #fff;
+  --el-tag-border-color: #e4e7ed;
+  --el-tag-text-color: #606266;
+  background-color: #fff;
+  border-color: #e4e7ed;
+  color: #606266;
+}
+.filter-tag.el-tag:not(.el-tag--dark):hover {
+  --el-tag-bg-color: #fff;
+  --el-tag-border-color: #409eff;
+  --el-tag-text-color: #409eff;
+  background-color: #fff;
+  border-color: #409eff;
+  color: #409eff;
+}
+.filter-tag.el-tag.el-tag--dark,
+.filter-tag.el-tag.el-tag--dark:hover {
+  --el-tag-bg-color: #409eff;
+  --el-tag-border-color: #409eff;
+  --el-tag-text-color: #fff;
+  background-color: #409eff;
+  border-color: #409eff;
+  color: #fff;
 }
 .banner-img {
   width: 100%;
@@ -442,23 +431,26 @@ const goDetail = (id) => {
 }
 .spot-section {
   background: #fff;
-  border-radius: 8px;
-  border: 1px solid #ebeef5;
-  padding: 16px;
+  border-radius: 12px;
+  border: none;
+  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  padding: 18px 20px;
 }
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
   margin-bottom: 16px;
 }
 .section-title {
-  font-size: 18px;
-  font-weight: 600;
-  color: #303133;
+  font-size: 16px;
+  font-weight: 700;
+  color: #2c3e50;
 }
 .section-hint {
-  font-size: 12px;
+  font-size: 13px;
   font-weight: 400;
   color: #909399;
   margin-left: 10px;
@@ -468,28 +460,48 @@ const goDetail = (id) => {
   align-items: center;
   gap: 12px;
 }
+.section-actions :deep(.el-button.is-link) {
+  color: #409eff;
+  font-size: 14px;
+  height: auto;
+  padding: 4px 2px;
+}
+.section-actions :deep(.el-button.is-link:hover) {
+  color: #409eff;
+  text-decoration: underline;
+}
 .tab-bar {
-  display: flex;
-  gap: 8px;
-  margin-bottom: 16px;
-  background: #fff;
-  border: 1px solid #ebeef5;
-  border-radius: 8px;
-  padding: 6px;
+  display: inline-flex;
+  gap: 4px;
+  margin: 0 0 18px;
+  padding: 4px;
+  background: #f7f8fa;
+  border: none;
+  border-radius: 10px;
+  max-width: 100%;
+  box-sizing: border-box;
+  overflow-x: auto;
+  vertical-align: top;
 }
 .tab-item {
-  padding: 8px 20px;
-  border-radius: 6px;
+  flex-shrink: 0;
+  padding: 6px 18px;
+  border: 1px solid #e5e7eb;
+  border-radius: 7px;
+  background: #fff;
   cursor: pointer;
   color: #606266;
-  font-size: 14px;
-  transition: all 0.2s;
+  font-size: 13px;
+  line-height: 1.4;
+  transition: all 0.2s ease;
 }
 .tab-item:hover {
+  border-color: #409eff;
   color: #409eff;
 }
 .tab-item.active {
   background: #409eff;
+  border-color: #409eff;
   color: #fff;
   font-weight: 600;
 }
@@ -508,44 +520,45 @@ const goDetail = (id) => {
   grid-column: 1 / -1;
   width: 100%;
 }
-.province-tabs {
-  display: flex;
-  gap: 8px;
-}
-.province-tag {
-  cursor: pointer;
-}
 .spot-body {
   display: flex;
   gap: 16px;
+  align-items: flex-start;
 }
 .rank-panel {
   width: 260px;
   flex-shrink: 0;
-  border: 1px solid #f0f0f0;
-  border-radius: 8px;
+  border: none;
+  border-radius: 12px;
+  background: #f7f8fa;
+  padding: 8px;
   overflow: hidden;
 }
 .rank-header {
-  background: linear-gradient(90deg, #f7f9ff 0%, #fff 100%);
-  padding: 10px 12px;
-  font-weight: 600;
-  border-bottom: 1px solid #f0f0f0;
+  background: #eef3fb;
+  border-radius: 8px;
+  padding: 12px 14px;
+  margin-bottom: 4px;
+  font-size: 14px;
+  font-weight: 700;
+  color: #2c3e50;
 }
 .rank-item {
   display: flex;
   align-items: center;
   gap: 10px;
-  padding: 10px 12px;
-  border-bottom: 1px solid #f7f7f7;
+  padding: 12px 14px;
+  border-radius: 8px;
+  transition: background 0.2s ease;
 }
-.rank-item:last-child {
-  border-bottom: none;
+.rank-item:hover {
+  background: #eef3fb;
 }
 .rank-num {
   width: 20px;
   text-align: center;
   color: #909399;
+  font-size: 13px;
   font-weight: 600;
 }
 .rank-num.top {
@@ -553,14 +566,17 @@ const goDetail = (id) => {
 }
 .rank-info {
   flex: 1;
+  min-width: 0;
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 .rank-name {
+  flex: 1;
+  min-width: 0;
   cursor: pointer;
-  color: #303133;
+  color: #2c3e50;
   font-size: 14px;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -573,17 +589,25 @@ const goDetail = (id) => {
   color: #f56c6c;
   font-weight: 600;
   font-size: 13px;
+  white-space: nowrap;
 }
 .spot-grid {
   flex: 1;
+  min-width: 0;
   display: grid;
   grid-template-columns: repeat(4, 1fr);
-  gap: 12px;
+  gap: 16px;
 }
-.spot-card {
+.spot-card.el-card {
   cursor: pointer;
-  border-radius: 8px;
+  border: 1px solid #e5e7eb;
+  border-radius: 12px;
   overflow: hidden;
+  transition: transform 0.2s ease, box-shadow 0.2s ease;
+}
+.spot-card.el-card.is-hover-shadow:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12);
 }
 .spot-card :deep(.el-card__body) {
   padding: 0;
@@ -591,22 +615,28 @@ const goDetail = (id) => {
 .spot-img-wrap {
   width: 100%;
   height: 120px;
+  border-radius: 12px 12px 0 0;
   overflow: hidden;
+  background: #f7f8fa;
 }
 .spot-img {
+  display: block;
   width: 100%;
   height: 100%;
   object-fit: cover;
 }
 .spot-info {
-  padding: 10px 12px;
+  padding: 12px 14px 14px;
   display: flex;
   flex-direction: column;
   gap: 6px;
 }
 .spot-name {
+  font-size: 14px;
   font-weight: 600;
-  color: #303133;
+  color: #2c3e50;
+  line-height: 20px;
+  min-height: 20px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -614,11 +644,17 @@ const goDetail = (id) => {
 .spot-city {
   color: #909399;
   font-size: 13px;
+  line-height: 18px;
+  min-height: 18px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .spot-bottom {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  min-height: 22px;
 }
 .spot-score {
   color: #67c23a;
@@ -626,7 +662,8 @@ const goDetail = (id) => {
 }
 .spot-price {
   color: #f56c6c;
-  font-weight: 600;
+  font-weight: 700;
+  font-size: 15px;
 }
 @media (max-width: 1200px) {
   .spot-grid {
@@ -642,6 +679,16 @@ const goDetail = (id) => {
   }
   .rank-panel {
     width: 100%;
+  }
+}
+@media (max-width: 768px) {
+  .spot-grid {
+    grid-template-columns: repeat(2, 1fr);
+  }
+}
+@media (max-width: 560px) {
+  .spot-grid {
+    grid-template-columns: 1fr;
   }
 }
 </style>
