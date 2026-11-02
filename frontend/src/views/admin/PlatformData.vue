@@ -18,6 +18,12 @@
         <el-table-column prop="id" label="ID" width="70" />
         <el-table-column prop="name" label="酒店名称" min-width="190" />
         <el-table-column prop="address" label="地址" min-width="210" />
+        <el-table-column label="坐标" min-width="180">
+          <template #default="{ row }">
+            <span v-if="row.lng != null && row.lat != null">{{ Number(row.lng).toFixed(6) }}, {{ Number(row.lat).toFixed(6) }}</span>
+            <el-tag v-else size="small" type="info">未设置</el-tag>
+          </template>
+        </el-table-column>
         <el-table-column label="单价" width="100">
           <template #default="{ row }"><span class="price">¥{{ formatMoney(row.price_per_day) }}</span></template>
         </el-table-column>
@@ -72,6 +78,13 @@
         <el-form-item label="详细地址">
           <el-input v-model="form.address" />
         </el-form-item>
+        <el-form-item label="经纬度">
+          <div class="coord-row">
+            <el-input v-model="form.lng" placeholder="经度，如 120.153576" />
+            <el-input v-model="form.lat" placeholder="纬度，如 30.287459" />
+            <el-button :loading="geoLoading" @click="fetchCoords">按名称获取</el-button>
+          </div>
+        </el-form-item>
         <el-form-item label="单日单价">
           <el-input-number v-model="form.price_per_day" :min="0" :step="50" />
         </el-form-item>
@@ -112,6 +125,7 @@ import {
   adminDeleteHotel,
   getAdminOrders
 } from '@/api/hotel'
+import { geoCode } from '@/api/map'
 
 const tab = ref('hotel')
 const hotels = ref([])
@@ -121,11 +135,12 @@ const orderLoading = ref(false)
 
 const dialogVisible = ref(false)
 const submitting = ref(false)
+const geoLoading = ref(false)
 const editingId = ref(null)
 const formRef = ref(null)
 const form = reactive({
-  name: '', address: '', price_per_day: 300, cover_img: '', description: '', facilities: '',
-  env_score: 0, service_score: 0
+  name: '', address: '', lng: '', lat: '', price_per_day: 300, cover_img: '', description: '',
+  facilities: '', env_score: 0, service_score: 0
 })
 const rules = { name: [{ required: true, message: '请输入酒店名称', trigger: 'blur' }] }
 
@@ -163,8 +178,8 @@ const fetchOrders = async () => {
 
 const resetForm = () => {
   Object.assign(form, {
-    name: '', address: '', price_per_day: 300, cover_img: '', description: '', facilities: '',
-    env_score: 0, service_score: 0
+    name: '', address: '', lng: '', lat: '', price_per_day: 300, cover_img: '', description: '',
+    facilities: '', env_score: 0, service_score: 0
   })
   editingId.value = null
   formRef.value?.clearValidate()
@@ -181,6 +196,8 @@ const openEdit = (row) => {
   Object.assign(form, {
     name: row.name || '',
     address: row.address || '',
+    lng: row.lng == null ? '' : String(row.lng),
+    lat: row.lat == null ? '' : String(row.lat),
     price_per_day: Number(row.price_per_day) || 0,
     cover_img: row.cover_img || '',
     description: row.description || '',
@@ -191,12 +208,38 @@ const openEdit = (row) => {
   dialogVisible.value = true
 }
 
+// 按酒店名称一键获取经纬度（后端转发高德地理编码）
+const fetchCoords = async () => {
+  const name = (form.name || '').trim()
+  if (!name) {
+    ElMessage.warning('请先填写酒店名称')
+    return
+  }
+  geoLoading.value = true
+  try {
+    const res = await geoCode(name)
+    const data = res.data || {}
+    form.lng = String(data.lng)
+    form.lat = String(data.lat)
+    ElMessage.success('已获取坐标：' + data.lng + ', ' + data.lat)
+  } catch (e) {
+    ElMessage.error(err(e, '获取坐标失败'))
+  } finally {
+    geoLoading.value = false
+  }
+}
+
 const submit = async () => {
   const valid = await formRef.value?.validate().catch(() => false)
   if (!valid) return
   submitting.value = true
   try {
-    const payload = { ...form, name: form.name.trim() }
+    const payload = {
+      ...form,
+      name: form.name.trim(),
+      lng: form.lng === '' || form.lng === null ? null : Number(form.lng),
+      lat: form.lat === '' || form.lat === null ? null : Number(form.lat)
+    }
     if (editingId.value) await adminUpdateHotel(editingId.value, payload)
     else await adminCreateHotel(payload)
     ElMessage.success('保存成功')
@@ -249,4 +292,5 @@ onMounted(fetchHotels)
 .card-title { font-weight: 600; }
 .price { color: #f56c6c; font-weight: 600; }
 .score-row { display: flex; align-items: center; gap: 8px; color: #606266; }
+.coord-row { display: flex; align-items: center; gap: 8px; width: 100%; }
 </style>
