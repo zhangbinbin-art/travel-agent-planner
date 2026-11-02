@@ -57,9 +57,8 @@
         </el-tab-pane>
 
         <el-tab-pane label="我的帖子" name="post" lazy>
-          <!-- TODO(backend): GET /api/v1/user/posts 提供后，用真实帖子列表替换此处空态。 -->
           <div class="embedded-pane">
-            <EmptyState description="暂无帖子" hint="你发布的游记会显示在这里" />
+            <MyPost />
           </div>
         </el-tab-pane>
 
@@ -89,6 +88,7 @@ import MyFavorite from '@/views/user/MyFavorite.vue'
 import MyPlan from '@/views/user/MyPlan.vue'
 import MyBooking from '@/views/user/MyBooking.vue'
 import MyLikePost from '@/views/user/MyLikePost.vue'
+import MyPost from '@/views/user/MyPost.vue'
 import EmptyState from '@/components/EmptyState.vue'
 
 const route = useRoute()

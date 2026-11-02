@@ -228,6 +228,24 @@ def get_post_by_id(db: Session, post_id: int):
     return db.query(Post).filter(Post.id == post_id).first()
 
 
+def get_user_posts(db: Session, user_id: int, page: int = 1, page_size: int = 20, current_user: User = None):
+    """当前用户发布的全部游记（含待审核/已驳回），按发布时间倒序。"""
+    query = db.query(Post).filter(Post.user_id == user_id)
+    total = query.count()
+    items = (
+        query.order_by(Post.created_at.desc(), Post.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": [build_post_out(p, db=db, current_user=current_user) for p in items],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 def create_post(db: Session, user_id: int, data: dict):
     post_data = dict(data)
     if "spot_ids" in post_data and post_data["spot_ids"] is not None:

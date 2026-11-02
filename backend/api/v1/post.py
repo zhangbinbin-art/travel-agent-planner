@@ -86,6 +86,23 @@ def list_posts(
     )
 
 
+@router.get("/my", response_model=PostListResponse)
+def list_my_posts(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """当前用户自己的游记列表（含待审核、已驳回），用于个人中心「我的帖子」。"""
+    return post_service.get_user_posts(
+        db,
+        current_user.id,
+        page=page,
+        page_size=page_size,
+        current_user=current_user,
+    )
+
+
 @router.get("/{post_id}", response_model=PostDetailOut)
 def get_post(post_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     post = post_service.get_post_by_id(db, post_id)
