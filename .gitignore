@@ -44,3 +44,4 @@ Thumbs.db
 # opencode local data & uploads
 .opencode-data/
 backend/static/
+.omo/
