@@ -26,6 +26,27 @@ def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(securit
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="User not found")
     return user
 
+def get_optional_user(
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+    db: Session = Depends(get_db),
+):
+    """可选的登录态：无 token / token 失效时返回 None，而不是抛 401。
+
+    用于「未登录也能浏览公开内容」的接口（如他人主页游记列表）。
+    """
+    if not credentials:
+        return None
+    try:
+        payload = jwt.decode(credentials.credentials, settings.SECRET_KEY, algorithms=[settings.ALGORITHM])
+        user_id = payload.get("sub")
+        if user_id is None:
+            return None
+        user_id_int = int(user_id)
+    except (PyJWTError, ValueError, TypeError):
+        return None
+    return db.query(User).filter(User.id == user_id_int).first()
+
+
 def get_current_active_user(current_user: User = Depends(get_current_user)):
     return current_user
 

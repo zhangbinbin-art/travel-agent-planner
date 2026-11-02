@@ -219,3 +219,8 @@ class Bill(Base):
     pay_channel = Column(String(20))
     pay_time = Column(DateTime(timezone=True), server_default=func.now())
     order = relationship("HotelOrder")
+
+
+# 社交模块单独成文件，在此导入以保证 Base.metadata 能收集到这两张表
+from models.follow import Follow  # noqa: E402,F401
+from models.message import Message  # noqa: E402,F401

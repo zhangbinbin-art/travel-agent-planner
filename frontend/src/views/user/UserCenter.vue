@@ -74,6 +74,18 @@
             <MyLikePost />
           </div>
         </el-tab-pane>
+
+        <el-tab-pane label="我关注的" name="follow" lazy>
+          <div class="embedded-pane">
+            <MyFollow />
+          </div>
+        </el-tab-pane>
+
+        <el-tab-pane label="粉丝" name="fans" lazy>
+          <div class="embedded-pane">
+            <MyFans />
+          </div>
+        </el-tab-pane>
       </el-tabs>
     </el-card>
   </div>
@@ -89,12 +101,14 @@ import MyPlan from '@/views/user/MyPlan.vue'
 import MyBooking from '@/views/user/MyBooking.vue'
 import MyLikePost from '@/views/user/MyLikePost.vue'
 import MyPost from '@/views/user/MyPost.vue'
+import MyFollow from '@/views/user/MyFollow.vue'
+import MyFans from '@/views/user/MyFans.vue'
 import EmptyState from '@/components/EmptyState.vue'
 
 const route = useRoute()
 const router = useRouter()
 
-const TAB_NAMES = ['collect', 'trip', 'booking', 'post', 'comment', 'like']
+const TAB_NAMES = ['collect', 'trip', 'booking', 'post', 'comment', 'like', 'follow', 'fans']
 const initialTab = TAB_NAMES.includes(route.query.tab) ? route.query.tab : 'collect'
 
 const active = ref(initialTab)

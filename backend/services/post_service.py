@@ -257,6 +257,40 @@ def get_user_posts(db: Session, user_id: int, page: int = 1, page_size: int = 20
     }
 
 
+def get_author_posts(
+    db: Session,
+    author_id: int,
+    viewer: Optional[User] = None,
+    page: int = 1,
+    page_size: int = 12,
+):
+    """指定用户主页的游记列表，复用 visible 可见性规则。
+
+    - 作者本人：全部（含待审核/已驳回、私密）
+    - 管理员：全部
+    - 其他人：仅已审核通过且 visible=public
+    """
+    query = db.query(Post).filter(Post.user_id == author_id)
+    is_owner = viewer is not None and int(viewer.id) == int(author_id)
+    is_admin = viewer is not None and getattr(viewer, "role", None) == "admin"
+    if not is_owner and not is_admin:
+        query = query.filter(Post.status == 1)
+        query = query.filter(or_(Post.visible == "public", Post.visible.is_(None)))
+    total = query.count()
+    posts = (
+        query.order_by(Post.created_at.desc(), Post.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    return {
+        "items": [build_post_out(p, db=db, current_user=viewer) for p in posts],
+        "total": total,
+        "page": page,
+        "page_size": page_size,
+    }
+
+
 def create_post(db: Session, user_id: int, data: dict):
     post_data = dict(data)
     if "spot_ids" in post_data and post_data["spot_ids"] is not None:
