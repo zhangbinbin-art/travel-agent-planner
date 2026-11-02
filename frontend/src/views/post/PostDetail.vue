@@ -108,16 +108,15 @@
           </div>
         </template>
 
-        <div v-if="imageList.length" ref="galleryRef" class="post-gallery">
+        <div v-if="imageList.length" class="post-gallery">
           <el-carousel
             v-if="imageList.length > 1"
             class="post-carousel"
-            :height="carouselHeight"
+            height="100%"
             :autoplay="false"
-            indicator-position="outside"
+            indicator-position="inside"
             arrow="hover"
             trigger="click"
-            @change="onCarouselChange"
           >
             <el-carousel-item v-for="(src, idx) in imageList" :key="idx">
               <el-image
@@ -287,7 +286,7 @@
 </template>
 
 <script setup>
-import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { ref, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Star, StarFilled, Share, Link, Location, Setting, EditPen, Lock, Delete } from '@element-plus/icons-vue'
@@ -427,76 +426,6 @@ const imageList = computed(() => {
   const arr = (post.value?.images || []).filter((s) => typeof s === 'string' && s.trim())
   if (arr.length) return arr
   return post.value?.cover ? [post.value.cover] : []
-})
-
-// ---------- 图片区高度自适应（仅影响渲染尺寸，轮播逻辑不变） ----------
-const galleryRef = ref(null)
-const carouselIndex = ref(0)
-const galleryWidth = ref(0)
-const imageRatios = ref({})
-
-const currentImage = computed(
-  () => imageList.value[carouselIndex.value] || imageList.value[0] || ''
-)
-
-const carouselHeight = computed(() => {
-  const ratio =
-    imageRatios.value[currentImage.value] ??
-    imageRatios.value[imageList.value[0]] ??
-    0.66
-  const width = galleryWidth.value || 760
-  return `${Math.round(width * ratio)}px`
-})
-
-const preloadRatios = () => {
-  imageList.value.forEach((src) => {
-    if (!src || imageRatios.value[src]) return
-    const probe = new Image()
-    probe.onload = () => {
-      if (probe.naturalWidth > 0) {
-        imageRatios.value = {
-          ...imageRatios.value,
-          [src]: probe.naturalHeight / probe.naturalWidth
-        }
-      }
-    }
-    probe.src = src
-  })
-}
-
-const onCarouselChange = (idx) => {
-  carouselIndex.value = idx
-}
-
-let galleryObserver = null
-const measureGallery = () => {
-  if (galleryRef.value) {
-    galleryWidth.value = galleryRef.value.clientWidth
-  }
-}
-
-watch(
-  imageList,
-  (list) => {
-    carouselIndex.value = 0
-    if (!list.length) return
-    preloadRatios()
-    measureGallery()
-  },
-  { immediate: true }
-)
-
-// 图片区随正文出现（v-if）时再挂观察器，宽度变化时重算高度
-watch(galleryRef, (el) => {
-  if (galleryObserver) {
-    galleryObserver.disconnect()
-    galleryObserver = null
-  }
-  if (el && typeof ResizeObserver !== 'undefined') {
-    galleryObserver = new ResizeObserver(measureGallery)
-    galleryObserver.observe(el)
-  }
-  measureGallery()
 })
 
 const AVATAR_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#909399', '#8e7cc3', '#2f9e7e']
@@ -747,13 +676,6 @@ const handleDeleteComment = async (comment) => {
   }
 }
 
-onBeforeUnmount(() => {
-  if (galleryObserver) {
-    galleryObserver.disconnect()
-    galleryObserver = null
-  }
-})
-
 onMounted(() => {
   fetchDetail()
   fetchRelated()
@@ -770,7 +692,7 @@ onMounted(() => {
   background: #f5f8fa;
 }
 .detail-inner {
-  max-width: 860px;
+  max-width: 560px;
   margin: 0 auto;
 }
 .detail-card {
@@ -877,27 +799,39 @@ onMounted(() => {
 }
 
 /* ---------- D. 图片区（轮播 / 单图） ---------- */
+/* 固定 3:4 画幅（小红书竖版），所有图片统一画幅 */
 .post-gallery {
-  margin: 8px 0;
+  max-width: 460px;
+  aspect-ratio: 3 / 4;
+  margin: 16px auto;
+  border-radius: 12px;
+  overflow: hidden;
+  background: #f7f7f7;
+}
+.post-carousel {
+  height: 100%;
 }
 .post-carousel :deep(.el-carousel__container) {
-  border-radius: 10px;
+  height: 100%;
+  border-radius: 12px;
   overflow: hidden;
-  background: #f6f6f6;
+  background: #f7f7f7;
 }
 .post-carousel :deep(.el-carousel__item) {
   display: flex;
   align-items: center;
   justify-content: center;
-  background: #f6f6f6;
+  background: #f7f7f7;
 }
-.post-carousel :deep(.el-carousel__indicators--outside) {
-  margin-top: 10px;
+/* 指示器放在容器底部内侧，与浅灰底色区分开 */
+.post-carousel :deep(.el-carousel__indicators--inside) {
+  bottom: 10px;
 }
 .post-carousel :deep(.el-carousel__indicator .el-carousel__button) {
   width: 22px;
   height: 4px;
   border-radius: 2px;
+  background-color: rgba(0, 0, 0, 0.22);
 }
 .post-carousel :deep(.el-carousel__indicator.is-active .el-carousel__button) {
   background-color: #409eff;
@@ -906,29 +840,30 @@ onMounted(() => {
   display: block;
   width: 100%;
   height: 100%;
+  cursor: zoom-in;
 }
 .gallery-image :deep(img) {
   display: block;
   width: 100%;
-  max-width: 100%;
-  height: auto;
-  max-height: 100%;
+  height: 100%;
   object-fit: contain;
+  cursor: zoom-in;
 }
 .gallery-single {
   display: block;
   width: 100%;
-  height: auto;
-  border-radius: 10px;
+  height: 100%;
+  border-radius: 12px;
   overflow: hidden;
-  background: #f6f6f6;
+  background: #f7f7f7;
+  cursor: zoom-in;
 }
 .gallery-single :deep(img) {
   display: block;
   width: 100%;
-  max-width: 100%;
-  height: auto;
+  height: 100%;
   object-fit: contain;
+  cursor: zoom-in;
 }
 
 /* ---------- E. 正文 ---------- */
@@ -1291,7 +1226,7 @@ onMounted(() => {
     gap: 10px;
   }
   .post-gallery {
-    margin: 4px 0 20px;
+    margin: 16px auto;
   }
   .post-content {
     font-size: 15px;
