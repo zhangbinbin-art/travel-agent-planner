@@ -97,12 +97,15 @@
           </div>
         </el-form-item>
         <el-form-item label="正文" prop="content">
-          <el-input
-            v-model="form.content"
-            type="textarea"
-            :rows="14"
-            placeholder="分享你的旅行故事…"
-          />
+          <div class="post-content-field">
+            <el-input
+              v-model="form.content"
+              type="textarea"
+              resize="vertical"
+              placeholder="写下你的旅行见闻、游玩感受、攻略心得……"
+            />
+            <p class="post-content-tip">提示：内容提交后需要管理员审核</p>
+          </div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="submitting" @click="handleSubmit">保存</el-button>
@@ -461,5 +464,58 @@ onMounted(() => {
   background: rgba(0, 0, 0, 0.45);
   color: #fff;
   font-size: 11px;
+}
+/* ===== 正文输入区（仅 content 字段，不影响其他控件） ===== */
+.post-content-field {
+  width: 100%;
+}
+.post-content-field :deep(.el-textarea__inner) {
+  min-height: 220px;
+  padding: 16px;
+  font-size: 15px;
+  line-height: 1.7;
+  color: #303133;
+  font-family: inherit;
+  background-color: #fbfbfb;
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  box-shadow: none;
+  resize: vertical;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  scrollbar-width: thin;
+  scrollbar-color: #dcdfe6 transparent;
+}
+.post-content-field :deep(.el-textarea__inner:hover) {
+  border-color: #c0c4cc;
+  box-shadow: none;
+}
+.post-content-field :deep(.el-textarea__inner:focus) {
+  border-color: #409eff;
+  box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.15);
+  outline: none;
+}
+.post-content-field :deep(.el-textarea__inner::-webkit-scrollbar) {
+  width: 6px;
+  height: 6px;
+}
+.post-content-field :deep(.el-textarea__inner::-webkit-scrollbar-track) {
+  background: transparent;
+}
+.post-content-field :deep(.el-textarea__inner::-webkit-scrollbar-thumb) {
+  background-color: #dcdfe6;
+  border-radius: 3px;
+}
+.post-content-field :deep(.el-textarea__inner::-webkit-scrollbar-thumb:hover) {
+  background-color: #c0c4cc;
+}
+.post-content-field :deep(.el-textarea__inner::placeholder) {
+  color: #a8abb2;
+}
+.post-content-tip {
+  margin: 6px 0 0;
+  text-align: right;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #888;
 }
 </style>
