@@ -2,8 +2,20 @@ import axios from 'axios'
 import router from '@/router'
 import { clearAuth, loadAuth } from '@/utils/auth'
 
+// 局域网访问时用当前域名/IP，避免硬编码 127.0.0.1 导致手机连不上后端
+const getBaseURL = () => {
+  if (import.meta.env.VITE_API_BASE_URL) {
+    return import.meta.env.VITE_API_BASE_URL
+  }
+  if (typeof window !== 'undefined') {
+    const hostname = window.location.hostname
+    return `http://${hostname}:8000`
+  }
+  return 'http://localhost:8000'
+}
+
 const api = axios.create({
-  baseURL: 'http://127.0.0.1:8000',
+  baseURL: getBaseURL(),
   timeout: 10000
 })
 

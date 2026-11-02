@@ -3,6 +3,15 @@
     <el-card class="register-card">
       <template #header>注册</template>
       <el-form ref="formRef" label-width="80px" :model="form" :rules="rules" @submit.prevent>
+        <el-form-item label="账号类型" prop="role">
+          <el-radio-group v-model="form.role">
+            <el-radio-button value="user">游客</el-radio-button>
+            <el-radio-button value="merchant">酒店商家</el-radio-button>
+          </el-radio-group>
+        </el-form-item>
+        <el-form-item v-if="form.role === 'merchant'" label="店铺名称" prop="shop_name">
+          <el-input v-model="form.shop_name" placeholder="请输入酒店/店铺名称" clearable />
+        </el-form-item>
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" placeholder="请输入用户名" clearable />
         </el-form-item>
@@ -33,7 +42,9 @@ const loading = ref(false)
 const form = reactive({
   username: '',
   password: '',
-  confirm: ''
+  confirm: '',
+  role: 'user',
+  shop_name: ''
 })
 
 const validatePassword = (rule, value, callback) => {
@@ -89,9 +100,15 @@ const handleRegister = () => {
     try {
       await api.post('/api/v1/user/register', {
         username: form.username,
-        password: form.password
+        password: form.password,
+        role: form.role,
+        shop_name: form.role === 'merchant' ? form.shop_name : undefined
       })
-      ElMessage.success('注册成功')
+      if (form.role === 'merchant') {
+        ElMessage.success('商家账号注册成功，请等待管理员审核通过后登录')
+      } else {
+        ElMessage.success('注册成功')
+      }
       router.push('/login')
     } catch (e) {
       console.log('register error:', e)
@@ -140,9 +157,29 @@ const handleRegister = () => {
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background: #f7f8fa;
+  background-image: url('https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=1920&q=80');
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
+  position: relative;
+  padding: 20px;
 }
+
+.register::before {
+  content: '';
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 28, 63, 0.45);
+  z-index: 0;
+}
+
 .register-card {
   width: 420px;
+  position: relative;
+  z-index: 1;
+  border-radius: 12px;
 }
 </style>

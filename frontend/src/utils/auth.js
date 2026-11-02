@@ -17,7 +17,8 @@ function decodeToken(token) {
 
 export const auth = reactive({
   token: '',
-  role: 'guest',
+  role: '',
+  auditStatus: '',
   userId: null,
   username: ''
 })
@@ -26,7 +27,8 @@ export function loadAuth() {
   const token = localStorage.getItem('token') || ''
   if (!token) {
     auth.token = ''
-    auth.role = 'guest'
+    auth.role = ''
+    auth.auditStatus = ''
     auth.userId = null
     auth.username = ''
     return
@@ -38,14 +40,18 @@ export function loadAuth() {
   }
   auth.token = token
   auth.role = payload.role || 'user'
+  auth.auditStatus = localStorage.getItem('audit_status') || 'approved'
   auth.userId = payload.sub ? Number(payload.sub) : null
   auth.username = localStorage.getItem('username') || ''
 }
 
-export function setAuth(token, username) {
+export function setAuth(token, username, auditStatus) {
   localStorage.setItem('token', token)
   if (username) {
     localStorage.setItem('username', username)
+  }
+  if (auditStatus) {
+    localStorage.setItem('audit_status', auditStatus)
   }
   loadAuth()
   if (username) {
@@ -56,8 +62,10 @@ export function setAuth(token, username) {
 export function clearAuth() {
   localStorage.removeItem('token')
   localStorage.removeItem('username')
+  localStorage.removeItem('audit_status')
   auth.token = ''
-  auth.role = 'guest'
+  auth.role = ''
+  auth.auditStatus = ''
   auth.userId = null
   auth.username = ''
 }
@@ -68,6 +76,10 @@ export function isLoggedIn() {
 
 export function isAdmin() {
   return auth.role === 'admin'
+}
+
+export function isApprovedMerchant() {
+  return auth.role === 'merchant' && auth.auditStatus === 'approved'
 }
 
 loadAuth()

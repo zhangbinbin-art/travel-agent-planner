@@ -26,8 +26,9 @@ const router = useRouter()
 
 const roleText = computed(() => {
   if (auth.role === 'admin') return '管理员'
+  if (auth.role === 'merchant') return '商家'
   if (auth.role === 'user') return '普通用户'
-  return '游客'
+  return auth.role || ''
 })
 
 const handleLogout = () => {
