@@ -25,7 +25,8 @@ const routes = [
       { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') },
       { path: 'admin/post-review', name: 'AdminPostReview', component: () => import('@/views/admin/PostReview.vue') },
       { path: 'admin/merchant', name: 'AdminMerchantAudit', component: () => import('@/views/admin/MerchantAudit.vue') },
-      { path: 'admin/data', name: 'AdminPlatformData', component: () => import('@/views/admin/PlatformData.vue') }
+      { path: 'admin/data', name: 'AdminPlatformData', component: () => import('@/views/admin/PlatformData.vue') },
+      { path: 'admin/spot', name: 'AdminSpotManage', component: () => import('@/views/admin/SpotManage.vue') }
     ]
   },
   {

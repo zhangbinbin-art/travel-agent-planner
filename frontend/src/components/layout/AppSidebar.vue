@@ -7,6 +7,7 @@
       <el-menu-item v-if="auth.token" index="/user">个人中心</el-menu-item>
       <el-menu-item v-if="auth.role === 'admin'" index="/admin/post-review">内容审核</el-menu-item>
       <el-menu-item v-if="auth.role === 'admin'" index="/admin/merchant">商家审核</el-menu-item>
+      <el-menu-item v-if="auth.role === 'admin'" index="/admin/spot">景点管理</el-menu-item>
       <el-menu-item v-if="auth.role === 'admin'" index="/admin/data">平台总览</el-menu-item>
       <el-menu-item v-if="auth.role === 'admin'" index="/admin">管理员后台</el-menu-item>
       <el-menu-item v-if="!auth.token" index="/login">登录</el-menu-item>

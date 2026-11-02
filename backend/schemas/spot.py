@@ -13,6 +13,9 @@ class SpotBase(BaseModel):
     score: Optional[float] = 0
     price: Optional[float] = 0
     cover: Optional[str] = None
+    # 经纬度（v0.13 新增）：后台按名称一键获取，用于地图标注与真实距离
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
 class SpotCreate(SpotBase):
@@ -29,6 +32,8 @@ class SpotUpdate(BaseModel):
     score: Optional[float] = None
     price: Optional[float] = None
     cover: Optional[str] = None
+    lat: Optional[float] = None
+    lng: Optional[float] = None
 
 
 class SpotOut(SpotBase):
