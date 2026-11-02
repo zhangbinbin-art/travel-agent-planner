@@ -10,5 +10,7 @@ class Settings:
     ACCESS_TOKEN_EXPIRE_MINUTES = int(os.getenv("ACCESS_TOKEN_EXPIRE_MINUTES", "60"))
     FRONTEND_ORIGIN = os.getenv("FRONTEND_ORIGIN", "http://localhost:5173")
     AMAP_KEY = os.getenv("AMAP_KEY", "")
+    # Web 服务（地理编码/距离等 REST 接口）专用 Key；未单独配置时回退到 AMAP_KEY
+    AMAP_WEB_KEY = os.getenv("AMAP_WEB_KEY") or os.getenv("AMAP_KEY", "")
 
 settings = Settings()
