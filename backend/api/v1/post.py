@@ -6,6 +6,7 @@ from models import User, Post, Comment, PostFavorite
 from schemas.post import (
     PostCreate,
     PostUpdate,
+    PostVisibilityUpdate,
     PostOut,
     PostDetailOut,
     PostListResponse,
@@ -83,6 +84,8 @@ def list_posts(
         status=status_filter,
         spot_id=spot_id,
         current_user=current_user,
+        viewer_id=current_user.id,
+        include_all_visibility=getattr(current_user, "role", "user") == "admin",
     )
 
 
@@ -110,6 +113,11 @@ def get_post(post_id: int, db: Session = Depends(get_db), current_user: User = D
         raise HTTPException(status_code=404, detail="游记不存在")
     status = getattr(post, "status", 0) or 0
     if status != 1:
+        if getattr(current_user, "role", "user") != "admin" and current_user.id != post.user_id:
+            raise HTTPException(status_code=404, detail="游记不存在")
+    # 可见范围拦截：非公开游记仅作者本人与管理员可访问
+    visible = getattr(post, "visible", "public") or "public"
+    if visible != "public":
         if getattr(current_user, "role", "user") != "admin" and current_user.id != post.user_id:
             raise HTTPException(status_code=404, detail="游记不存在")
     post.view_count = int(post.view_count or 0) + 1
@@ -163,6 +171,25 @@ def update_post(
     _ensure_owner_or_admin(current_user, post.user_id)
     is_admin = getattr(current_user, "role", "user") == "admin"
     post = post_service.update_post(db, post, post_in.model_dump(exclude_unset=True), is_admin=is_admin)
+    return post_service.build_post_out(post, db=db, current_user=current_user)
+
+
+@router.put("/{post_id}/visible", response_model=PostOut)
+def update_post_visibility(
+    post_id: int,
+    payload: PostVisibilityUpdate,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """修改游记可见范围（public/friend/private）。只改可见性，不重置审核状态。"""
+    post = post_service.get_post_by_id(db, post_id)
+    if not post:
+        raise HTTPException(status_code=404, detail="游记不存在")
+    if current_user.id != post.user_id and getattr(current_user, "role", "user") != "admin":
+        raise HTTPException(status_code=403, detail="只有作者本人可以修改可见范围")
+    post.visible = payload.visible
+    db.commit()
+    db.refresh(post)
     return post_service.build_post_out(post, db=db, current_user=current_user)
 
 

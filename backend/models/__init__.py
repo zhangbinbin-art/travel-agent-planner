@@ -58,6 +58,7 @@ class Post(Base):
     comment_count = Column(Integer, default=0)
     heat = Column(Integer, default=0)
     status = Column(Integer, default=0)
+    visible = Column(String(16), nullable=False, default="public", server_default="public")
     created_at = Column(DateTime(timezone=True), server_default=func.now())
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
     author = relationship("User")

@@ -6,6 +6,11 @@
           <div class="detail-header">
             <div class="detail-title-block">
               <h1 class="detail-title" :title="post.title">{{ post.title }}</h1>
+              <div class="post-visibility">
+                <el-tag size="small" :type="visibilityTagType" effect="plain" round>
+                  {{ visibilityLabel }}
+                </el-tag>
+              </div>
               <div class="post-meta">
                 <span>点赞：{{ post.like_count ?? 0 }}</span>
                 <span>评论：{{ post.comment_count ?? 0 }}</span>
@@ -59,8 +64,34 @@
                 </template>
               </el-dropdown>
               <el-button size="small" @click="goList">返回列表</el-button>
-              <el-button v-if="canManage" size="small" @click="goEdit">编辑</el-button>
-              <el-button v-if="canManage" size="small" type="danger" plain @click="handleDeletePost">删除</el-button>
+              <el-dropdown
+                v-if="isAuthor"
+                class="setting-dropdown"
+                trigger="click"
+                placement="bottom-end"
+                @command="handleSettingCommand"
+              >
+                <el-button size="small">
+                  <el-icon class="setting-icon"><Setting /></el-icon>
+                  <span>设置</span>
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu class="setting-menu">
+                    <el-dropdown-item command="edit">
+                      <el-icon><EditPen /></el-icon>
+                      编辑
+                    </el-dropdown-item>
+                    <el-dropdown-item command="visibility" divided>
+                      <el-icon><Lock /></el-icon>
+                      权限设置
+                    </el-dropdown-item>
+                    <el-dropdown-item command="delete" divided class="setting-danger">
+                      <el-icon><Delete /></el-icon>
+                      删除
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
             </div>
           </div>
 
@@ -77,20 +108,22 @@
           </div>
         </template>
 
-        <div v-if="imageList.length" class="post-gallery">
+        <div v-if="imageList.length" ref="galleryRef" class="post-gallery">
           <el-carousel
             v-if="imageList.length > 1"
             class="post-carousel"
+            :height="carouselHeight"
             :autoplay="false"
             indicator-position="outside"
             arrow="hover"
             trigger="click"
+            @change="onCarouselChange"
           >
             <el-carousel-item v-for="(src, idx) in imageList" :key="idx">
               <el-image
                 class="gallery-image"
                 :src="src"
-                fit="cover"
+                fit="contain"
                 :preview-src-list="imageList"
                 :initial-index="idx"
                 preview-teleported
@@ -102,7 +135,7 @@
             v-else
             class="gallery-single"
             :src="imageList[0]"
-            fit="cover"
+            fit="contain"
             :preview-src-list="imageList"
             :initial-index="0"
             preview-teleported
@@ -225,17 +258,43 @@
         </div>
       </el-card>
     </div>
+
+    <el-dialog
+      v-model="visibilityDialog"
+      title="游记可见范围设置"
+      width="420px"
+      class="visibility-dialog"
+      :close-on-click-modal="false"
+      append-to-body
+    >
+      <el-radio-group v-model="visibilityValue" class="visibility-group">
+        <el-radio
+          v-for="opt in VISIBILITY_OPTIONS"
+          :key="opt.value"
+          :value="opt.value"
+          class="visibility-option"
+        >
+          <span class="visibility-option-label">{{ opt.label }}</span>
+          <span class="visibility-option-desc">{{ opt.desc }}</span>
+        </el-radio>
+      </el-radio-group>
+      <template #footer>
+        <el-button @click="visibilityDialog = false">取消</el-button>
+        <el-button type="primary" :loading="visibilitySaving" @click="saveVisibility">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, computed, onMounted } from 'vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { Star, StarFilled, Share, Link, Location } from '@element-plus/icons-vue'
+import { Star, StarFilled, Share, Link, Location, Setting, EditPen, Lock, Delete } from '@element-plus/icons-vue'
 import {
   getPostDetail,
   deletePost,
+  updatePostVisible,
   likePost,
   getCommentList,
   createPostComment,
@@ -287,6 +346,74 @@ const commentTotal = ref(0)
 const favoriting = ref(false)
 const relatedPosts = ref([])
 
+// ---------- 可见范围 ----------
+const VISIBILITY_OPTIONS = [
+  { value: 'public', label: '公开可见', desc: '全部用户都能在游记广场看到' },
+  { value: 'friend', label: '仅互关好友可见', desc: '只有互相关注的用户可以查看' },
+  { value: 'private', label: '仅自己可见', desc: '私密，其他人无法查看这条游记' }
+]
+
+const VISIBILITY_META = {
+  public: { label: '【公开】', type: 'success' },
+  friend: { label: '【仅互关好友】', type: 'warning' },
+  private: { label: '【私密】', type: 'info' }
+}
+
+const visibilityDialog = ref(false)
+const visibilityValue = ref('public')
+const visibilitySaving = ref(false)
+
+const isAuthor = computed(
+  () => !!post.value && auth.userId !== null && auth.userId === post.value.user_id
+)
+
+const visibilityLabel = computed(
+  () => VISIBILITY_META[post.value?.visible || 'public']?.label || VISIBILITY_META.public.label
+)
+
+const visibilityTagType = computed(
+  () => VISIBILITY_META[post.value?.visible || 'public']?.type || 'success'
+)
+
+const openVisibilityDialog = () => {
+  if (!post.value) return
+  visibilityValue.value = post.value.visible || 'public'
+  visibilityDialog.value = true
+}
+
+const saveVisibility = async () => {
+  if (!post.value) return
+  if (visibilityValue.value === (post.value.visible || 'public')) {
+    visibilityDialog.value = false
+    return
+  }
+  visibilitySaving.value = true
+  try {
+    const res = await updatePostVisible(post.value.id, visibilityValue.value)
+    post.value.visible = res.data?.visible || visibilityValue.value
+    ElMessage.success('可见范围已更新')
+    visibilityDialog.value = false
+  } catch (e) {
+    ElMessage.error(extractError(e, '设置失败'))
+  } finally {
+    visibilitySaving.value = false
+  }
+}
+
+const handleSettingCommand = (command) => {
+  if (command === 'edit') {
+    goEdit()
+    return
+  }
+  if (command === 'visibility') {
+    openVisibilityDialog()
+    return
+  }
+  if (command === 'delete') {
+    handleDeletePost()
+  }
+}
+
 const canManage = computed(
   () =>
     !!post.value &&
@@ -300,6 +427,76 @@ const imageList = computed(() => {
   const arr = (post.value?.images || []).filter((s) => typeof s === 'string' && s.trim())
   if (arr.length) return arr
   return post.value?.cover ? [post.value.cover] : []
+})
+
+// ---------- 图片区高度自适应（仅影响渲染尺寸，轮播逻辑不变） ----------
+const galleryRef = ref(null)
+const carouselIndex = ref(0)
+const galleryWidth = ref(0)
+const imageRatios = ref({})
+
+const currentImage = computed(
+  () => imageList.value[carouselIndex.value] || imageList.value[0] || ''
+)
+
+const carouselHeight = computed(() => {
+  const ratio =
+    imageRatios.value[currentImage.value] ??
+    imageRatios.value[imageList.value[0]] ??
+    0.66
+  const width = galleryWidth.value || 760
+  return `${Math.round(width * ratio)}px`
+})
+
+const preloadRatios = () => {
+  imageList.value.forEach((src) => {
+    if (!src || imageRatios.value[src]) return
+    const probe = new Image()
+    probe.onload = () => {
+      if (probe.naturalWidth > 0) {
+        imageRatios.value = {
+          ...imageRatios.value,
+          [src]: probe.naturalHeight / probe.naturalWidth
+        }
+      }
+    }
+    probe.src = src
+  })
+}
+
+const onCarouselChange = (idx) => {
+  carouselIndex.value = idx
+}
+
+let galleryObserver = null
+const measureGallery = () => {
+  if (galleryRef.value) {
+    galleryWidth.value = galleryRef.value.clientWidth
+  }
+}
+
+watch(
+  imageList,
+  (list) => {
+    carouselIndex.value = 0
+    if (!list.length) return
+    preloadRatios()
+    measureGallery()
+  },
+  { immediate: true }
+)
+
+// 图片区随正文出现（v-if）时再挂观察器，宽度变化时重算高度
+watch(galleryRef, (el) => {
+  if (galleryObserver) {
+    galleryObserver.disconnect()
+    galleryObserver = null
+  }
+  if (el && typeof ResizeObserver !== 'undefined') {
+    galleryObserver = new ResizeObserver(measureGallery)
+    galleryObserver.observe(el)
+  }
+  measureGallery()
 })
 
 const AVATAR_COLORS = ['#409eff', '#67c23a', '#e6a23c', '#909399', '#8e7cc3', '#2f9e7e']
@@ -455,7 +652,7 @@ const handleDeletePost = async () => {
     return
   }
   try {
-    await ElMessageBox.confirm('确定删除这篇游记吗？删除后不可恢复', '提示', { type: 'warning' })
+    await ElMessageBox.confirm('确定要删除这条游记吗？删除后不可恢复', '提示', { type: 'warning' })
   } catch (e) {
     return
   }
@@ -549,6 +746,13 @@ const handleDeleteComment = async (comment) => {
     ElMessage.error(extractError(e, '删除失败'))
   }
 }
+
+onBeforeUnmount(() => {
+  if (galleryObserver) {
+    galleryObserver.disconnect()
+    galleryObserver = null
+  }
+})
 
 onMounted(() => {
   fetchDetail()
@@ -674,18 +878,18 @@ onMounted(() => {
 
 /* ---------- D. 图片区（轮播 / 单图） ---------- */
 .post-gallery {
-  margin: 8px 0 28px;
+  margin: 8px 0;
 }
 .post-carousel :deep(.el-carousel__container) {
-  height: 380px;
-  border-radius: 8px;
+  border-radius: 10px;
   overflow: hidden;
-  background: #f5f7fa;
+  background: #f6f6f6;
 }
 .post-carousel :deep(.el-carousel__item) {
   display: flex;
   align-items: center;
-  background: #f5f7fa;
+  justify-content: center;
+  background: #f6f6f6;
 }
 .post-carousel :deep(.el-carousel__indicators--outside) {
   margin-top: 10px;
@@ -699,27 +903,32 @@ onMounted(() => {
   background-color: #409eff;
 }
 .gallery-image {
+  display: block;
   width: 100%;
   height: 100%;
 }
 .gallery-image :deep(img) {
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  height: auto;
+  max-height: 100%;
+  object-fit: contain;
 }
 .gallery-single {
   display: block;
   width: 100%;
-  height: 420px;
-  max-height: 420px;
-  border-radius: 8px;
+  height: auto;
+  border-radius: 10px;
   overflow: hidden;
-  background: #f5f7fa;
+  background: #f6f6f6;
 }
 .gallery-single :deep(img) {
+  display: block;
   width: 100%;
-  height: 100%;
-  object-fit: cover;
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
 }
 
 /* ---------- E. 正文 ---------- */
@@ -1005,7 +1214,8 @@ onMounted(() => {
 .header-actions {
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  align-items: center;
+  gap: 12px;
   flex-shrink: 0;
 }
 .header-actions :deep(.el-button) {
@@ -1083,13 +1293,6 @@ onMounted(() => {
   .post-gallery {
     margin: 4px 0 20px;
   }
-  .post-carousel :deep(.el-carousel__container) {
-    height: 240px;
-  }
-  .gallery-single {
-    height: 240px;
-    max-height: 240px;
-  }
   .post-content {
     font-size: 15px;
   }
@@ -1135,5 +1338,64 @@ onMounted(() => {
 }
 .post-location .location-tag.is-custom.el-tag:hover {
   border-color: #e4e7ed;
+}
+/* ---------- 可见范围 ---------- */
+.post-visibility {
+  margin: 2px 0 2px;
+}
+.post-visibility :deep(.el-tag) {
+  border-radius: 10px;
+  font-size: 12px;
+}
+.setting-icon {
+  font-size: 14px;
+}
+.setting-menu {
+  --el-dropdown-menuItem-hover-fill: #f5f7fa;
+}
+.setting-menu :deep(.el-dropdown-menu__item.setting-danger) {
+  color: #f56c6c;
+}
+.setting-menu :deep(.el-dropdown-menu__item.setting-danger:hover) {
+  background-color: #fef0f0;
+  color: #f56c6c;
+}
+.visibility-group {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  width: 100%;
+}
+.visibility-group :deep(.el-radio) {
+  display: flex;
+  align-items: flex-start;
+  width: 100%;
+  height: auto;
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #fff;
+  transition: border-color 0.2s ease, background-color 0.2s ease;
+}
+.visibility-group :deep(.el-radio.is-checked) {
+  border-color: #409eff;
+  background: #f2f7ff;
+}
+.visibility-group :deep(.el-radio__label) {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  line-height: 1.5;
+  white-space: normal;
+}
+.visibility-option-label {
+  font-size: 14px;
+  font-weight: 500;
+  color: #303133;
+}
+.visibility-option-desc {
+  font-size: 12px;
+  color: #909399;
 }
 </style>

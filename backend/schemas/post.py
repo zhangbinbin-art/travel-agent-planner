@@ -1,8 +1,10 @@
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Optional, List, Literal
 from datetime import datetime
 from schemas.common import UserBrief
 from schemas.comment import CommentOut
+
+POST_VISIBILITY = Literal["public", "friend", "private"]
 
 
 class PostCreate(BaseModel):
@@ -12,6 +14,7 @@ class PostCreate(BaseModel):
     spot_ids: Optional[List[int]] = None
     images: Optional[List[str]] = None
     custom_spots: Optional[List[str]] = None
+    visible: Optional[POST_VISIBILITY] = "public"
 
 
 class PostUpdate(BaseModel):
@@ -21,6 +24,11 @@ class PostUpdate(BaseModel):
     spot_ids: Optional[List[int]] = None
     images: Optional[List[str]] = None
     custom_spots: Optional[List[str]] = None
+    visible: Optional[POST_VISIBILITY] = None
+
+
+class PostVisibilityUpdate(BaseModel):
+    visible: POST_VISIBILITY
 
 
 class SpotBrief(BaseModel):
@@ -45,6 +53,7 @@ class PostOut(BaseModel):
     heat: int = 0
     status: int = 0
     status_text: str = ""
+    visible: str = "public"
     liked: bool = False
     favorited: bool = False
     favorite_count: int = 0

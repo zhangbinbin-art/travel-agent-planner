@@ -1,11 +1,13 @@
 import json
 from datetime import datetime
+from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from models import Post, Spot, PostLike, Comment, CommentLike, User, PostFavorite
 from typing import Optional
 
 
 STATUS_TEXT = {0: "待审核", 1: "已通过", 2: "已驳回"}
+VISIBILITY_VALUES = ("public", "friend", "private")
 
 
 def _parse_spot_ids(spot_ids_str: str):
@@ -159,6 +161,7 @@ def build_post_out(post: Post, db: Session = None, current_user: User = None) ->
         "heat": int(getattr(post, "heat", 0) or 0),
         "status": status,
         "status_text": STATUS_TEXT.get(status, str(status)),
+        "visible": getattr(post, "visible", "public") or "public",
         "liked": bool(liked),
         "favorited": bool(favorited),
         "favorite_count": int(favorite_count),
@@ -181,8 +184,16 @@ def get_posts(
     status: Optional[int] = None,
     spot_id: Optional[int] = None,
     current_user: Optional[User] = None,
+    viewer_id: Optional[int] = None,
+    include_all_visibility: bool = False,
 ):
     query = db.query(Post)
+    # 可见性过滤：public 所有人可见；friend/private 仅作者本人（项目暂无互关关系表）
+    if not include_all_visibility:
+        visible_conditions = [Post.visible == "public", Post.visible.is_(None)]
+        if viewer_id is not None:
+            visible_conditions.append(Post.user_id == viewer_id)
+        query = query.filter(or_(*visible_conditions))
     if status is not None:
         query = query.filter(Post.status == status)
     if keyword:
@@ -263,6 +274,10 @@ def create_post(db: Session, user_id: int, data: dict):
         post_data["images"] = "[]"
     custom_spots = post_data.pop("custom_spots", None)
     post_data["custom_spots"] = _dump_custom_spots(custom_spots)
+    visible = post_data.get("visible") or "public"
+    if visible not in VISIBILITY_VALUES:
+        visible = "public"
+    post_data["visible"] = visible
     post_data["status"] = 0
     post_data["view_count"] = 0
     post_data["like_count"] = 0
