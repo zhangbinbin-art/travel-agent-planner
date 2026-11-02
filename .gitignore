@@ -40,3 +40,7 @@ Thumbs.db
 *.tmp
 *.swp
 *~
+
+# opencode local data & uploads
+.opencode-data/
+backend/static/
