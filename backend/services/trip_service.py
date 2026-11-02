@@ -51,6 +51,27 @@ def get_spot_point(spot: Spot) -> Tuple[float, float]:
     return (round(base_x + dx, 2), round(base_y + dy, 2))
 
 
+def get_spot_lnglat(spot: Spot) -> Tuple[Optional[float], Optional[float]]:
+    """返回景点的真实经纬度 (lng, lat)，仅用于前端高德地图可视化。
+
+    优先使用 spots 表里的真实坐标；表格中部分演示景点没有坐标，
+    此时用城市真实中心坐标 + 由景点 id 决定的确定性小偏移近似（幅度约 2km），
+    保证地图能落点且每次生成结果一致。
+    该函数不参与距离与预算计算，距离仍由 get_distance 决定。
+    """
+    if spot.lng is not None and spot.lat is not None:
+        return (float(spot.lng), float(spot.lat))
+    center = _CITY_COORDS.get((spot.city or "").strip())
+    if center is None:
+        return (None, None)
+    center_lat, center_lng = center
+    # 用 md5(景点 id) 生成确定性抖动，幅度约 ±0.03/±0.025 度（约 ±3km），避免同城景点完全重合
+    digest = md5(("lnglat-%s" % spot.id).encode("utf-8")).digest()
+    d_lng = (digest[0] / 255.0 - 0.5) * 0.06
+    d_lat = (digest[1] / 255.0 - 0.5) * 0.05
+    return (round(center_lng + d_lng, 6), round(center_lat + d_lat, 6))
+
+
 def _mock_distance(spot_a: Spot, spot_b: Spot) -> float:
     """模拟距离（1 坐标单位≈1km），保留 v0.8 的确定性算法。
 
@@ -397,6 +418,7 @@ def generate_route(
     for order, spot_id in enumerate(walk_order):
         spot = spot_map[spot_id]
         x, y = get_spot_point(spot)
+        lng, lat = get_spot_lnglat(spot)
         route.append(
             RouteSpot(
                 id=spot.id,
@@ -406,6 +428,8 @@ def generate_route(
                 x=x,
                 y=y,
                 order=order,
+                lng=lng,
+                lat=lat,
             )
         )
 
@@ -787,6 +811,7 @@ def smart_recommend(db: Session, payload) -> dict:
     route: List[RouteSpot] = []
     for order, spot in enumerate(ordered_route):
         x, y = get_spot_point(spot)
+        lng, lat = get_spot_lnglat(spot)
         route.append(
             RouteSpot(
                 id=spot.id,
@@ -796,6 +821,8 @@ def smart_recommend(db: Session, payload) -> dict:
                 x=x,
                 y=y,
                 order=order,
+                lng=lng,
+                lat=lat,
             )
         )
 
@@ -892,6 +919,8 @@ def smart_recommend(db: Session, payload) -> dict:
         "hotel_per_day": effective_hotel_price,
         "target_city": payload.target_city,
         "start_location": payload.start_location,
+        "start_lat": payload.start_lat,
+        "start_lng": payload.start_lng,
     }
 
 # 常用城市坐标（用于无高德 Key 时估算 出发地 -> 目的地 距离）
@@ -907,6 +936,7 @@ _CITY_COORDS = {
     "桂林": (25.2736, 110.29),
     "珠海": (22.2707, 113.5767),
     "嘉兴": (30.7461, 120.7555),
+    "佛山": (23.0218, 113.1219),
     "成都": (30.5728, 104.0668),
     "西安": (34.3416, 108.9398),
     "重庆": (29.563, 106.5516),

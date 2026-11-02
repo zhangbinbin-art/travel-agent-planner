@@ -56,6 +56,9 @@ class SmartRecommendResponse(BaseModel):
     hotel_per_day: Optional[float] = None
     target_city: str = ""
     start_location: Optional[str] = None
+    # 出发位置经纬度（v0.13 新增，仅供前端地图标记起点）
+    start_lat: Optional[float] = None
+    start_lng: Optional[float] = None
     # 出发地 -> 第一个景点的距离（km），已并入 total_distance
     departure_distance: Optional[float] = None
 
@@ -84,6 +87,9 @@ class RouteSpot(BaseModel):
     x: float
     y: float
     order: int
+    # 真实经纬度（v0.13 新增，仅供前端高德地图可视化，不参与距离/预算计算）
+    lng: Optional[float] = None
+    lat: Optional[float] = None
 
 
 class RouteLeg(BaseModel):

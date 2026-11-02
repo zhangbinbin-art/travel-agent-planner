@@ -207,7 +207,19 @@
             </div>
 
             <el-divider content-position="left">路线图</el-divider>
-            <div ref="chartRef" class="chart-container"></div>
+            <el-tabs v-model="routeView" class="route-view-tabs" @tab-change="onRouteViewChange">
+              <el-tab-pane label="高德地图" name="map">
+                <div v-show="mapVisible" ref="mapRef" class="plan-map"></div>
+                <el-empty
+                  v-if="!mapVisible"
+                  description="地图暂不可用，可切换到“路线示意图”查看"
+                  :image-size="60"
+                />
+              </el-tab-pane>
+              <el-tab-pane label="路线示意图" name="chart">
+                <div ref="chartRef" class="plan-chart"></div>
+              </el-tab-pane>
+            </el-tabs>
 
             <el-divider content-position="left">保存方案</el-divider>
             <div class="save-row">
@@ -270,6 +282,7 @@ import { saveTrip } from '@/api/trip'
 import { createHotelOrder } from '@/api/hotel'
 import { auth } from '@/utils/auth'
 import HotelPicker from '@/components/hotel/HotelPicker.vue'
+import { loadAMap } from '@/utils/amap'
 
 defineOptions({ name: 'Plan' })
 
@@ -277,7 +290,7 @@ const router = useRouter()
 
 const PLAN_CACHE_KEY = 'last_trip_plan'
 
-// 按需注册 ECharts 模块，避免整包引入导致 Plan 页 chunk 过大
+// 按需注册 ECharts 模块（「路线示意图」Tab 使用）
 echarts.use([GraphChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const travelTypes = ['单人出行', '情侣出行', '家庭亲子', '老年休闲']
@@ -323,9 +336,23 @@ const routeData = ref(null)
 const planName = ref('')
 const saving = ref(false)
 
+// 路线图区域两个 Tab：高德地图（真实道路）/ 路线示意图（ECharts 画布）
+const routeView = ref('map')
+const mapRef = ref(null)
+// 地图仅在 SDK 加载成功且绘制成功时展示；任一环节失败（未配置 Key / 加载失败 / 驾车接口失败）都隐藏，保留文字路线
+const mapVisible = ref(false)
 const chartRef = ref(null)
 let chartInstance = null
-let resizeHandler = null
+let amapApi = null
+let mapInstance = null
+let mapOverlays = []
+let mapInfoWindow = null
+let drivingRouters = []
+let mapRenderToken = 0
+// Tab 未激活时不初始化（隐藏容器宽高为 0，初始化会得到错误尺寸），切回时再补渲染
+let mapDirty = true
+let chartDirty = true
+let viewResizeHandler = null
 
 // 生成路线时实际使用的食宿单价快照
 const generatedHotelPerDay = ref(null)
@@ -689,11 +716,8 @@ const handleGenerate = async () => {
     }
     fillBookingDates(res.data?.budget?.days ?? days.value)
     await nextTick()
-    try {
-      initChart()
-    } catch (chartError) {
-      console.warn('[Plan] 路线图渲染失败，不影响行程生成:', chartError?.message)
-    }
+    await renderRouteMap()
+    renderRouteChart()
     savePlanCache()
   } catch (e) {
     ElMessage.error(extractError(e, '生成智能行程失败'))
@@ -722,10 +746,14 @@ const resetAll = (clearCache = false) => {
   generatedHotelPerDay.value = null
   savedTripId.value = null
   if (clearCache) clearPlanCache()
+  mapRenderToken += 1
+  destroyMap()
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null
   }
+  mapDirty = true
+  chartDirty = true
 }
 
 const handleReset = () => {
@@ -847,14 +875,129 @@ const submitBooking = async () => {
   }
 }
 
-const initChart = () => {
-  if (!chartRef.value || !routeData.value) return
+// ---------------------- 高德地图可视化（方案A：只做展示，不参与距离/预算） ----------------------
+// AMap.Driving 单次最多 16 个途经点，故一段最多 = 起点 + 16 途经 + 终点
+const AMAP_CHUNK_SIZE = 18
+
+const escapeMarkup = (text) =>
+  String(text ?? '').replace(/[&<>"']/g, (ch) => ({
+    '&': '&amp;',
+    '<': '&lt;',
+    '>': '&gt;',
+    '"': '&quot;',
+    "'": '&#39;'
+  })[ch])
+
+// 自绘 Marker：序号徽标 + 景点名，起点用绿色区分
+const buildMarkerHtml = (badge, name, isStart) => {
+  const bg = isStart ? '#67c23a' : '#409eff'
+  return (
+    '<div style="display:flex;align-items:center;gap:6px;transform:translate(-50%,-100%);white-space:nowrap;">'
+    + `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 4px;border-radius:11px;background:${bg};color:#fff;font-size:12px;font-weight:600;box-shadow:0 2px 6px rgba(0,0,0,.3);">${escapeMarkup(badge)}</span>`
+    + `<span style="font-size:12px;color:#303133;background:rgba(255,255,255,.92);padding:2px 6px;border-radius:4px;box-shadow:0 1px 4px rgba(0,0,0,.2);">${escapeMarkup(name)}</span>`
+    + '</div>'
+  )
+}
+
+const isValidCoord = (lng, lat) =>
+  Number.isFinite(lng) && Number.isFinite(lat)
+  && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
+  && !(lng === 0 && lat === 0)
+
+// 严格按后端返回顺序组装点位：出发地 -> 第1站 -> 第2站 ...，不做任何重排
+const buildMapPoints = (data) => {
+  const points = []
+  const startLng = Number(data?.start_lng)
+  const startLat = Number(data?.start_lat)
+  const hasDeparture = data?.departure_distance !== null && data?.departure_distance !== undefined
+  if (hasDeparture && isValidCoord(startLng, startLat)) {
+    points.push({
+      lng: startLng,
+      lat: startLat,
+      name: data?.start_location || startLocation.value || '出发地',
+      badge: '起',
+      isStart: true
+    })
+  }
+  let seq = 0
+  const route = Array.isArray(data?.route) ? data.route : []
+  route.forEach((spot) => {
+    const lng = Number(spot?.lng)
+    const lat = Number(spot?.lat)
+    if (!isValidCoord(lng, lat)) return
+    seq += 1
+    points.push({
+      lng,
+      lat,
+      name: spot?.name || '景点',
+      badge: String(seq),
+      isStart: false
+    })
+  })
+  return points
+}
+
+const clearMapOverlays = () => {
+  if (mapInfoWindow) {
+    try {
+      mapInfoWindow.close()
+    } catch (e) {
+      // 地图已销毁时忽略
+    }
+  }
+  drivingRouters.forEach((driving) => {
+    try {
+      driving.clear()
+    } catch (e) {
+      // 插件未就绪时忽略
+    }
+  })
+  drivingRouters = []
+  if (mapInstance && mapOverlays.length) {
+    mapInstance.remove(mapOverlays)
+  }
+  mapOverlays = []
+}
+
+const destroyMap = () => {
+  clearMapOverlays()
+  if (mapInstance) {
+    mapInstance.destroy()
+    mapInstance = null
+  }
+  if (mapInfoWindow) {
+    mapInfoWindow = null
+  }
+  mapVisible.value = false
+}
+
+// ---------------- 路线示意图（ECharts，沿用改造前的画布坐标渲染逻辑） ----------------
+const renderRouteChart = () => {
+  if (routeView.value !== 'chart') {
+    chartDirty = true
+    return
+  }
+  const view = routeData.value
+  if (!view) {
+    if (chartInstance) {
+      chartInstance.dispose()
+      chartInstance = null
+    }
+    chartDirty = false
+    return
+  }
+  if (!chartRef.value) {
+    chartDirty = true
+    return
+  }
   if (chartInstance) {
     chartInstance.dispose()
+    chartInstance = null
   }
   chartInstance = echarts.init(chartRef.value)
-  const route = routeData.value.route || []
-  const rawNodes = routeData.value.nodes || []
+
+  const route = view.route || []
+  const rawNodes = view.nodes || []
 
   // 路线图只渲染 spot 节点，hotel 节点不参与点位与连线
   const spotIds = [
@@ -878,14 +1021,9 @@ const initChart = () => {
     links.push({ source: graphNodes[i].name, target: graphNodes[i + 1].name })
   }
 
-  const option = {
+  chartInstance.setOption({
     tooltip: {
-      formatter: (params) => {
-        if (params.dataType === 'node') {
-          return params.value
-        }
-        return ''
-      }
+      formatter: (params) => (params.dataType === 'node' ? params.value : '')
     },
     xAxis: { show: false, type: 'value' },
     yAxis: { show: false, type: 'value' },
@@ -902,13 +1040,143 @@ const initChart = () => {
         edgeSymbolSize: [0, 10]
       }
     ]
-  }
-  chartInstance.setOption(option)
-  if (!resizeHandler) {
-    resizeHandler = () => {
-      if (chartInstance) chartInstance.resize()
+  })
+  chartDirty = false
+}
+
+// 两个 Tab 都懒初始化：切到哪个就渲染哪个，切走后再切回来只做 resize
+const onRouteViewChange = (name) => {
+  nextTick(() => {
+    if (name === 'map') {
+      if (mapDirty || !mapInstance) {
+        renderRouteMap()
+      } else {
+        mapInstance.resize()
+        mapInstance.setFitView(null, false, [60, 60, 80, 60])
+      }
+    } else if (name === 'chart') {
+      if (chartDirty || !chartInstance) {
+        renderRouteChart()
+      } else {
+        chartInstance.resize()
+      }
     }
-    window.addEventListener('resize', resizeHandler)
+  })
+}
+
+const bindViewResize = () => {
+  if (viewResizeHandler) return
+  viewResizeHandler = () => {
+    if (chartInstance) chartInstance.resize()
+    if (mapInstance) mapInstance.resize()
+  }
+  window.addEventListener('resize', viewResizeHandler)
+}
+
+// 按“原顺序”请求真实驾车路线；点位超过单次上限时按段切分，段与段共用端点保证连续
+const drawDrivingRoute = (points) =>
+  new Promise((resolve) => {
+    if (points.length < 2) {
+      resolve(true)
+      return
+    }
+    const segments = []
+    for (let i = 0; i < points.length - 1; i += AMAP_CHUNK_SIZE - 1) {
+      segments.push(points.slice(i, i + AMAP_CHUNK_SIZE))
+    }
+    let pending = segments.length
+    let allOk = true
+    segments.forEach((segment) => {
+      const origin = new amapApi.LngLat(segment[0].lng, segment[0].lat)
+      const destination = new amapApi.LngLat(segment[segment.length - 1].lng, segment[segment.length - 1].lat)
+      const waypoints = segment.slice(1, -1).map((p) => new amapApi.LngLat(p.lng, p.lat))
+      const driving = new amapApi.Driving({
+        map: mapInstance,
+        hideMarkers: true,
+        showTraffic: false,
+        autoFitView: false
+      })
+      drivingRouters.push(driving)
+      // optimize: false —— 关闭高德自带的途经点顺序优化，严格按后端算法输出的顺序画线
+      driving.search(origin, destination, { waypoints, optimize: false }, (status, result) => {
+        if (status !== 'complete' || !result) allOk = false
+        pending -= 1
+        if (pending === 0) resolve(allOk)
+      })
+    })
+  })
+
+const renderRouteMap = async () => {
+  const token = ++mapRenderToken
+  clearMapOverlays()
+  const points = buildMapPoints(routeData.value)
+  if (!points.length) {
+    destroyMap()
+    mapDirty = false
+    return
+  }
+  // 地图 Tab 未激活时先挂起，避免在 0 尺寸容器里初始化
+  if (routeView.value !== 'map') {
+    mapDirty = true
+    return
+  }
+  try {
+    amapApi = amapApi || (await loadAMap())
+    if (token !== mapRenderToken) return
+    mapVisible.value = true
+    await nextTick()
+    if (token !== mapRenderToken || !mapRef.value) return
+    if (!mapInstance) {
+      mapInstance = new amapApi.Map(mapRef.value, {
+        zoom: 11,
+        center: [points[0].lng, points[0].lat],
+        resizeEnable: true,
+        dragEnable: true,
+        scrollWheel: true,
+        doubleClickZoom: true
+      })
+    }
+    if (!mapInfoWindow) {
+      mapInfoWindow = new amapApi.InfoWindow({ offset: new amapApi.Pixel(0, -32), isCustom: false })
+    }
+    // 重新生成时先清空旧 Marker / 旧轨迹，再绘制新内容
+    clearMapOverlays()
+    mapOverlays = points.map((point, index) => {
+      const marker = new amapApi.Marker({
+        position: [point.lng, point.lat],
+        content: buildMarkerHtml(point.badge, point.name, point.isStart),
+        offset: new amapApi.Pixel(0, 0),
+        zIndex: 120 + index,
+        title: (point.isStart ? '起点·' : `第${point.badge}站·`) + point.name,
+        bubble: true
+      })
+      // 悬浮气泡显示点位名称
+      marker.on('mouseover', () => {
+        if (!mapInstance || !mapInfoWindow) return
+        const label = point.isStart ? `起点 · ${point.name}` : `第${point.badge}站 · ${point.name}`
+        mapInfoWindow.setContent(
+          `<div style="padding:2px 6px;font-size:12px;line-height:18px;color:#303133;">${escapeMarkup(label)}</div>`
+        )
+        mapInfoWindow.open(mapInstance, [point.lng, point.lat])
+      })
+      marker.on('mouseout', () => {
+        if (mapInfoWindow) mapInfoWindow.close()
+      })
+      marker.setMap(mapInstance)
+      return marker
+    })
+    const ok = points.length > 1 ? await drawDrivingRoute(points) : true
+    if (token !== mapRenderToken) return
+    // 高德返回的里程全部丢弃，只用它画轨迹
+    if (!ok) throw new Error('驾车路线请求失败')
+    mapInstance.setFitView(null, false, [60, 60, 80, 60])
+    mapDirty = false
+  } catch (e) {
+    console.warn('[Plan] 高德地图渲染失败，已隐藏地图:', e?.message || e)
+    if (token === mapRenderToken) {
+      destroyMap()
+      mapDirty = false
+    }
   }
 }
 
@@ -962,33 +1230,37 @@ onBeforeRouteLeave(() => {
   savePlanCache()
 })
 
-onMounted(() => {})
+onMounted(() => {
+  bindViewResize()
+})
 
 onActivated(() => {
   // 返回规划页时优先读取缓存回填，不自动清空表单
   if (restorePlanCache()) {
     nextTick(() => {
       if (routeData.value) {
-        try {
-          initChart()
-        } catch (e) {
-          console.warn('[Plan] 恢复路线图失败:', e?.message)
-        }
+        renderRouteMap()
+        renderRouteChart()
       }
     })
   } else if (routeData.value) {
-    nextTick(() => initChart())
+    nextTick(() => {
+      renderRouteMap()
+      renderRouteChart()
+    })
   }
 })
 
 onBeforeUnmount(() => {
+  mapRenderToken += 1
+  destroyMap()
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null
   }
-  if (resizeHandler) {
-    window.removeEventListener('resize', resizeHandler)
-    resizeHandler = null
+  if (viewResizeHandler) {
+    window.removeEventListener('resize', viewResizeHandler)
+    viewResizeHandler = null
   }
 })
 </script>
@@ -1113,9 +1385,21 @@ onBeforeUnmount(() => {
   border-radius: 4px;
   padding: 8px 10px;
 }
-.chart-container {
+.route-view-tabs {
+  margin-top: 16px;
+}
+.plan-map {
   width: 100%;
-  height: 380px;
+  height: 420px;
+  border-radius: 12px;
+  overflow: hidden;
+}
+.plan-chart {
+  width: 100%;
+  height: 420px;
+  border: 1px solid #ebeef5;
+  border-radius: 12px;
+  overflow: hidden;
 }
 .save-row {
   display: flex;
