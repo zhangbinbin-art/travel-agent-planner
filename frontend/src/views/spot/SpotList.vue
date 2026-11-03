@@ -95,26 +95,38 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { getSpotList } from '@/api/spot'
 import EmptyState from '@/components/EmptyState.vue'
 
 const router = useRouter()
+const route = useRoute()
 
 const defaultImg =
   'https://images.unsplash.com/photo-1506744038136-46273834b3fb?auto=format&fit=crop&w=800&q=80'
 
 const spots = ref([])
 const loading = ref(false)
-const keyword = ref('')
-const appliedKeyword = ref('')
-const activeCity = ref('')
-const activeThemes = ref([])
-const page = ref(1)
+// 初始状态从 URL query 恢复（?page=2&search=xxx&theme=xxx&city=xxx）
+const query = route.query
+const keyword = ref(String(query.search || ''))
+const appliedKeyword = ref(String(query.search || ''))
+const activeCity = ref(String(query.city || ''))
+const activeThemes = ref(String(query.theme || '').split(',').filter(Boolean))
+const page = ref(Math.max(1, Number(query.page) || 1))
 const pageSize = 12
 
-const themeOptions = ['自然风景', '历史古迹', '城市观光', '主题乐园', '美食探店', '徒步登山']
+// 8 个主题标签（与后端标签库一致）
+const themeOptions = ['自然风光', '人文古迹', '美食探店', '游乐乐园', '城市逛街', '徒步登山', '海滨海岛', '亲子出游']
+// 老数据 tags 里存的是 theme 口径值，按主题反查成新的 8 个标签之一；
+// 只做「一对一」映射，避免选了海滨海岛却把全部自然风景景点都筛出来。
+const THEME_TO_TAG = {
+  自然风景: '自然风光',
+  历史古迹: '人文古迹',
+  主题乐园: '游乐乐园',
+  城市观光: '城市逛街'
+}
 
 const cityOptions = computed(() => {
   const set = new Set()
@@ -150,31 +162,62 @@ const filteredSpots = computed(() => {
     if (kw) {
       const name = String(spot.name || '').toLowerCase()
       const city = String(spot.city || '').toLowerCase()
-      if (!name.includes(kw) && !city.includes(kw)) return false
+      const province = String(spot.province || '').toLowerCase()
+      // 关键词同时匹配 景点名称 / 城市 / 省份（如输入“广东”可筛出广东所有城市）
+      if (!name.includes(kw) && !city.includes(kw) && !province.includes(kw)) return false
     }
     if (activeCity.value && String(spot.city || '') !== activeCity.value) return false
     if (activeThemes.value.length) {
-      const haystack = `${spot.theme || ''} ${spot.tags || ''} ${spot.description || ''}`
-      if (!activeThemes.value.some((theme) => haystack.includes(theme))) return false
+      const tags = String(spot.tags || '')
+        .split(/[,，、]/)
+        .map((t) => t.trim())
+        .filter(Boolean)
+      // 新数据：tags 就是 8 个标签；老数据：tags 只有 1 个 theme 口径值，按映射对应
+      const legacyTag = tags.length === 1 ? THEME_TO_TAG[tags[0]] : null
+      const matched = activeThemes.value.some(
+        (tag) => tags.includes(tag) || legacyTag === tag
+      )
+      if (!matched) return false
     }
     return true
   })
 })
+
+const totalPages = computed(() => Math.max(1, Math.ceil(filteredSpots.value.length / pageSize)))
 
 const pagedSpots = computed(() => {
   const start = (page.value - 1) * pageSize
   return filteredSpots.value.slice(start, start + pageSize)
 })
 
+// query 里的 page 超过最大页数时自动回到第 1 页，避免空白页
+watch(totalPages, (total) => {
+  if (page.value > total) {
+    page.value = 1
+    syncQuery()
+  }
+})
+
 const hasFilter = computed(
   () => !!appliedKeyword.value || !!activeCity.value || activeThemes.value.length > 0
 )
 
+// 前端本地筛选需要全量数据：按 100 条/页循环拉取，最多 20 页
 const fetchSpots = async () => {
   loading.value = true
   try {
-    const res = await getSpotList({ page: 1, page_size: 100 })
-    spots.value = res.data?.items || []
+    const all = []
+    let currentPage = 1
+    let total = 0
+    do {
+      const res = await getSpotList({ page: currentPage, page_size: 100 })
+      const items = res.data?.items || []
+      total = Number(res.data?.total) || items.length
+      all.push(...items)
+      currentPage += 1
+      if (!items.length) break
+    } while (all.length < total && currentPage <= 20)
+    spots.value = all
   } catch (e) {
     spots.value = []
   } finally {
@@ -182,14 +225,26 @@ const fetchSpots = async () => {
   }
 }
 
+// 把当前筛选/页码写回 URL，刷新或从详情页返回都能恢复
+const syncQuery = () => {
+  const next = {}
+  if (appliedKeyword.value) next.search = appliedKeyword.value
+  if (activeThemes.value.length) next.theme = activeThemes.value.join(',')
+  if (activeCity.value) next.city = activeCity.value
+  if (page.value > 1) next.page = String(page.value)
+  router.replace({ path: route.path, query: next })
+}
+
 const applyKeyword = () => {
   appliedKeyword.value = keyword.value.trim()
   page.value = 1
+  syncQuery()
 }
 
 const toggleCity = (city) => {
   activeCity.value = activeCity.value === city ? '' : city
   page.value = 1
+  syncQuery()
 }
 
 const toggleTheme = (theme) => {
@@ -197,10 +252,12 @@ const toggleTheme = (theme) => {
   if (idx >= 0) activeThemes.value.splice(idx, 1)
   else activeThemes.value.push(theme)
   page.value = 1
+  syncQuery()
 }
 
 const handlePageChange = (val) => {
   page.value = val
+  syncQuery()
 }
 
 const resetAll = () => {
@@ -209,12 +266,27 @@ const resetAll = () => {
   activeCity.value = ''
   activeThemes.value = []
   page.value = 1
+  syncQuery()
 }
 
+// 进详情页带上当前 query，返回时可直接恢复
 const goDetail = (id) => {
   if (!id) return
-  router.push(`/spot-detail/${id}`)
+  router.push({ path: `/spot-detail/${id}`, query: route.query })
 }
+
+// 浏览器前进/后退或外部改 query 时同步表单状态
+const applyFromQuery = () => {
+  const q = route.query
+  keyword.value = String(q.search || '')
+  appliedKeyword.value = String(q.search || '')
+  activeCity.value = String(q.city || '')
+  const themes = String(q.theme || '').split(',').filter(Boolean)
+  if (activeThemes.value.join(',') !== themes.join(',')) activeThemes.value = themes
+  page.value = Math.max(1, Number(q.page) || 1)
+}
+
+watch(() => route.query, applyFromQuery)
 
 onMounted(fetchSpots)
 </script>
