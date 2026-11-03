@@ -155,8 +155,8 @@ onMounted(fetchPosts)
   gap: 14px;
   padding: 12px;
   background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border: 2px solid #222;
+  border-radius: 14px;
   cursor: pointer;
   transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
 }

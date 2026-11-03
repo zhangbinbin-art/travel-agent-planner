@@ -1,0 +1,280 @@
+/* ==========================================================================
+   TR 主题：清新圆角卡通旅游平台
+   - 页面底色 #E8F4FF
+   - 卡片/弹窗/输入/导航：白底 + 2px 黑边 + 大圆角
+   - 主色（按钮强调）：橙色
+   ========================================================================== */
+
+:root {
+  --tr-bg: #e8f4ff;
+  --tr-bg-deep: #d9ebff;
+  --tr-ink: #222222;
+  --tr-ink-soft: #4a5563;
+  --tr-muted: #7b8794;
+  --tr-orange: #ff7a2f;
+  --tr-orange-dark: #f06818;
+  --tr-orange-soft: #fff1e6;
+  --tr-border: 2px solid #222222;
+  --tr-border-soft: 2px solid rgba(34, 34, 34, 0.12);
+  --tr-radius-sm: 10px;
+  --tr-radius: 14px;
+  --tr-radius-lg: 20px;
+  --tr-shadow: 3px 3px 0 rgba(34, 34, 34, 0.1);
+  --tr-shadow-lg: 5px 5px 0 rgba(34, 34, 34, 0.14);
+  --tr-font: 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', Inter, system-ui, -apple-system,
+    'Segoe UI', sans-serif;
+
+  /* Element Plus 主色/圆角/文字对齐 */
+  --el-color-primary: #ff7a2f;
+  --el-color-primary-light-3: #ff9a62;
+  --el-color-primary-light-5: #ffb489;
+  --el-color-primary-light-7: #ffcfae;
+  --el-color-primary-light-9: #fff1e6;
+  --el-color-primary-dark-2: #f06818;
+  --el-border-radius-base: 12px;
+  --el-border-radius-small: 10px;
+  --el-border-radius-round: 999px;
+  --el-text-color-primary: #222222;
+  --el-text-color-regular: #3d4753;
+  --el-font-family: var(--tr-font);
+}
+
+html,
+body,
+#app {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--tr-bg);
+  color: var(--tr-ink);
+  font-family: var(--tr-font);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* ============================== 卡片 ============================== */
+.el-card {
+  border: var(--tr-border) !important;
+  border-radius: var(--tr-radius) !important;
+  box-shadow: var(--tr-shadow) !important;
+  background: #fff;
+  overflow: hidden;
+}
+.el-card__header {
+  border-bottom: 2px solid rgba(34, 34, 34, 0.1) !important;
+  font-weight: 700;
+  color: var(--tr-ink);
+}
+.el-card__body {
+  color: var(--tr-ink);
+}
+
+/* ============================== 弹窗 / 气泡 ============================== */
+.el-dialog {
+  border: var(--tr-border) !important;
+  border-radius: var(--tr-radius-lg) !important;
+  box-shadow: var(--tr-shadow-lg) !important;
+  overflow: hidden;
+}
+.el-dialog__header {
+  padding-bottom: 12px;
+}
+.el-dialog__title {
+  font-weight: 700;
+  color: var(--tr-ink);
+}
+.el-dialog__body {
+  color: var(--tr-ink);
+}
+.el-message-box {
+  border: var(--tr-border) !important;
+  border-radius: var(--tr-radius) !important;
+  box-shadow: var(--tr-shadow-lg) !important;
+}
+.el-popper.is-light,
+.el-dropdown__popper,
+.el-select__popper {
+  border: var(--tr-border) !important;
+  border-radius: var(--tr-radius-sm) !important;
+  box-shadow: var(--tr-shadow) !important;
+}
+.el-drawer {
+  border-left: var(--tr-border) !important;
+}
+
+/* ============================== 输入类 ============================== */
+.el-input__wrapper,
+.el-textarea__inner,
+.el-select__wrapper {
+  border: 2px solid #222 !important;
+  border-radius: var(--tr-radius-sm) !important;
+  box-shadow: none !important;
+  background: #fff !important;
+}
+.el-input__wrapper.is-focus,
+.el-select__wrapper.is-focused,
+.el-textarea__inner:focus {
+  border-color: var(--tr-orange) !important;
+  box-shadow: 0 0 0 3px rgba(255, 122, 47, 0.16) !important;
+}
+.el-input__inner::placeholder,
+.el-textarea__inner::placeholder {
+  color: #a6b0bd;
+}
+.el-input-number {
+  border: 2px solid #222;
+  border-radius: var(--tr-radius-sm);
+  overflow: hidden;
+  background: #fff;
+  line-height: normal;
+}
+.el-input-number .el-input__wrapper {
+  border: none !important;
+  box-shadow: none !important;
+}
+.el-input-number .el-input-number__decrease,
+.el-input-number .el-input-number__increase {
+  border-color: rgba(34, 34, 34, 0.12);
+  background: #f7faff;
+}
+
+/* ============================== 按钮 ============================== */
+.el-button {
+  border-radius: var(--tr-radius-sm);
+  font-weight: 600;
+  --el-button-text-color: #222;
+}
+.el-button--primary {
+  --el-button-bg-color: var(--tr-orange);
+  --el-button-border-color: var(--tr-orange);
+  --el-button-text-color: #fff;
+  --el-button-hover-bg-color: var(--tr-orange-dark);
+  --el-button-hover-border-color: var(--tr-orange-dark);
+  --el-button-active-bg-color: var(--tr-orange-dark);
+  --el-button-active-border-color: var(--tr-orange-dark);
+  --el-button-disabled-bg-color: #ffc39c;
+  --el-button-disabled-border-color: #ffc39c;
+}
+/* 次要按钮：白底 + 黑边（用 :where 降权，避免盖住页面内自定义按钮样式） */
+.el-button:where(.is-plain),
+.el-button:where(
+  :not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info):not(.is-text):not(.el-button--text):not(.is-link):not(.is-circle)
+) {
+  background: #fff;
+  border: 2px solid #222;
+  color: #222;
+}
+.el-button:where(.is-plain):hover,
+.el-button:where(
+  :not(.el-button--primary):not(.el-button--success):not(.el-button--warning):not(.el-button--danger):not(.el-button--info):not(.is-text):not(.el-button--text):not(.is-link):not(.is-circle)
+):hover {
+  background: var(--tr-orange-soft);
+  border-color: #222;
+  color: #222;
+}
+.el-button.is-text,
+.el-button--text {
+  background: transparent;
+  border: none;
+  color: var(--tr-ink-soft);
+}
+
+/* ============================== 标签 / 角标 ============================== */
+.el-tag {
+  border-radius: 999px;
+  border-width: 1px;
+  font-weight: 500;
+}
+.el-tag.el-tag--info {
+  background: #eef6ff;
+  border-color: rgba(34, 34, 34, 0.14);
+  color: #3f5872;
+}
+
+/* ============================== 表格（后台） ============================== */
+.el-table {
+  border: var(--tr-border);
+  border-radius: var(--tr-radius-sm);
+  overflow: hidden;
+}
+.el-table th.el-table__cell {
+  background: #fff4ea !important;
+  color: var(--tr-ink);
+  font-weight: 700;
+}
+.el-table td.el-table__cell,
+.el-table th.el-table__cell {
+  border-bottom: 1px solid rgba(34, 34, 34, 0.08);
+}
+.el-table__inner-wrapper::before {
+  display: none;
+}
+
+/* ============================== Tabs / 分页 ============================== */
+.el-tabs__item {
+  font-weight: 600;
+  color: var(--tr-ink-soft);
+}
+.el-tabs__item.is-active {
+  color: var(--tr-orange);
+}
+.el-tabs__active-bar {
+  background-color: var(--tr-orange);
+  height: 3px;
+  border-radius: 3px;
+}
+.el-pagination.is-background .el-pager li.is-active {
+  background: var(--tr-orange) !important;
+  border-radius: 8px;
+}
+.el-pagination.is-background .el-pager li,
+.el-pagination.is-background .btn-next,
+.el-pagination.is-background .btn-prev {
+  border-radius: 8px;
+  border: 1px solid rgba(34, 34, 34, 0.12);
+  background: #fff;
+}
+
+/* ============================== 通用工具类 ============================== */
+.tr-card {
+  background: #fff;
+  border: var(--tr-border);
+  border-radius: var(--tr-radius);
+  box-shadow: var(--tr-shadow);
+}
+.tr-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 10px;
+  border-radius: 999px;
+  background: #eef6ff;
+  border: 1px solid rgba(34, 34, 34, 0.12);
+  color: #3f5872;
+  font-size: 12px;
+  line-height: 20px;
+}
+.tr-score {
+  display: inline-flex;
+  align-items: center;
+  padding: 1px 7px;
+  border-radius: 6px;
+  background: #ffd666;
+  color: #5a3d00;
+  font-size: 12px;
+  font-weight: 700;
+}
+.tr-section-title {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--tr-ink);
+  letter-spacing: 0.5px;
+}
+.tr-section-sub {
+  font-size: 12px;
+  font-weight: 600;
+  letter-spacing: 2px;
+  text-transform: uppercase;
+  color: var(--tr-muted);
+}

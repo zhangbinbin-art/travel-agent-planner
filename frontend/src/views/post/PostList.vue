@@ -1,65 +1,85 @@
 <template>
-  <div class="post-list">
-    <el-card v-loading="loading">
-      <template #header>
-        <div class="card-header">
-          <span class="card-title">游记广场</span>
-          <el-button v-if="auth.token" type="primary" @click="goCreate">发布游记</el-button>
+  <div class="post-page">
+    <section class="page-card" v-loading="loading">
+      <header class="page-head">
+        <div class="page-heading">
+          <span class="tr-section-sub">Strategy</span>
+          <h1 class="tr-section-title">旅游攻略</h1>
         </div>
-      </template>
-      <div class="toolbar">
-        <el-form :inline="true" :model="filters" @submit.prevent class="search-form">
-          <el-form-item label="关键词">
-            <el-input v-model="filters.keyword" placeholder="搜索游记标题" clearable />
-          </el-form-item>
-          <el-form-item>
-            <el-button type="primary" @click="handleSearch">搜索</el-button>
-            <el-button @click="reset">重置</el-button>
-          </el-form-item>
-        </el-form>
-        <el-radio-group v-model="sort" size="default" @change="handleSortChange">
-          <el-radio-button value="latest">最新</el-radio-button>
-          <el-radio-button value="hot">热度</el-radio-button>
-        </el-radio-group>
+        <div class="page-search">
+          <el-input
+            v-model="filters.keyword"
+            placeholder="搜索游记标题"
+            clearable
+            @keyup.enter="handleSearch"
+            @clear="handleSearch"
+          />
+          <el-button type="primary" @click="handleSearch">搜索</el-button>
+        </div>
+      </header>
+
+      <div class="action-bar">
+        <button
+          type="button"
+          class="chip"
+          :class="{ 'is-active': sort === 'latest' }"
+          @click="switchSort('latest')"
+        >
+          最新发布
+        </button>
+        <button
+          type="button"
+          class="chip"
+          :class="{ 'is-active': sort === 'hot' }"
+          @click="switchSort('hot')"
+        >
+          热门排序
+        </button>
+        <button type="button" class="chip" @click="goMyPosts">我的攻略</button>
+        <button v-if="auth.token" type="button" class="chip chip--primary" @click="goCreate">
+          发布攻略
+        </button>
+        <el-button text class="reset-btn" @click="reset">清空筛选</el-button>
       </div>
-      <el-row :gutter="16">
-        <el-col
+
+      <div v-if="posts.length" class="post-grid">
+        <PostCard
           v-for="post in posts"
           :key="post.id"
-          :xs="24"
-          :sm="12"
-          :md="8"
-          :lg="6"
-          class="post-col"
-        >
-          <PostCard :post="post" @edit="handleEdit" @delete="handleDelete" />
-        </el-col>
-      </el-row>
-      <el-empty v-if="loaded && !posts.length" description="暂无游记" />
-      <el-pagination
-        class="pager"
-        background
-        layout="prev, pager, next"
-        :total="total"
-        :page-size="pageSize"
-        :current-page="page"
-        @current-change="handlePageChange"
-      />
-    </el-card>
+          :post="post"
+          @edit="handleEdit"
+          @delete="handleDelete"
+        />
+      </div>
+      <EmptyState v-else-if="loaded" description="暂无游记" hint="发布你的第一篇攻略吧" />
+
+      <div v-if="total > pageSize" class="pager">
+        <el-pagination
+          background
+          layout="prev, pager, next"
+          :total="total"
+          :page-size="pageSize"
+          :current-page="page"
+          @current-change="handlePageChange"
+        />
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
+import { reactive, ref, onMounted, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getPostList, deletePost } from '@/api/post'
 import { auth } from '@/utils/auth'
 import PostCard from '@/components/PostCard.vue'
+import EmptyState from '@/components/EmptyState.vue'
 
 const router = useRouter()
+const route = useRoute()
 
-const filters = reactive({ keyword: '' })
+const filters = reactive({ keyword: String(route.query.keyword || '') })
 const posts = ref([])
 const total = ref(0)
 const page = ref(1)
@@ -109,9 +129,35 @@ const reset = () => {
   fetchList()
 }
 
+// 顶部导航栏搜索：同步 keyword 查询参数
+watch(
+  () => route.query.keyword,
+  (val) => {
+    const next = String(val || '')
+    if (next === filters.keyword) return
+    filters.keyword = next
+    page.value = 1
+    fetchList()
+  }
+)
+
 const handleSortChange = () => {
   page.value = 1
   fetchList()
+}
+
+const switchSort = (value) => {
+  if (sort.value === value) return
+  sort.value = value
+  handleSortChange()
+}
+
+const goMyPosts = () => {
+  if (!auth.token) {
+    router.push({ path: '/login', query: { redirect: '/user' } })
+    return
+  }
+  router.push('/user?tab=post')
 }
 
 const handlePageChange = (p) => {
@@ -174,5 +220,96 @@ onMounted(() => {
   margin-top: 16px;
   display: flex;
   justify-content: center;
+}
+
+/* ===== 页面容器（与旅游景点页统一） ===== */
+.post-page {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-bottom: 24px;
+}
+.page-card {
+  padding: 20px 22px;
+  background: #fff;
+  border: 2px solid #222;
+  border-radius: 18px;
+  box-shadow: 4px 4px 0 rgba(34, 34, 34, 0.1);
+}
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.page-heading .tr-section-title {
+  margin: 0;
+}
+.page-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.page-search :deep(.el-input) {
+  width: 240px;
+}
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 16px;
+  margin-bottom: 16px;
+  border-top: 1px dashed rgba(34, 34, 34, 0.12);
+}
+.chip {
+  padding: 6px 16px;
+  border: 2px solid rgba(34, 34, 34, 0.14);
+  border-radius: 999px;
+  background: #fff;
+  color: #3d4753;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+.chip:hover {
+  background: #eef6ff;
+  border-color: #222;
+}
+.chip.is-active {
+  background: #fff1e6;
+  border-color: #222;
+  color: #f06818;
+}
+.chip--primary {
+  background: #ff7a2f;
+  border-color: #ff7a2f;
+  color: #fff;
+}
+.chip--primary:hover {
+  background: #f06818;
+  border-color: #f06818;
+  color: #fff;
+}
+.reset-btn {
+  margin-left: auto;
+  color: #7b8794;
+}
+.post-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(250px, 1fr));
+  gap: 18px;
+}
+.pager {
+  display: flex;
+  justify-content: center;
+  margin-top: 22px;
 }
 </style>

@@ -71,54 +71,61 @@
 
       <!-- ========== ③ 景点介绍 ========== -->
       <div v-if="activeTab === 'intro'" class="tab-panel">
-        <section class="content-card">
-          <h2 class="card-title">基本信息</h2>
-          <div class="info-grid">
-            <div class="info-item">
-              <span class="info-label">城市</span>
-              <span class="info-value">{{ locationText || '—' }}</span>
+        <div class="info-cards">
+          <section class="content-card">
+            <h2 class="card-title">景点信息</h2>
+            <div class="info-list">
+              <div class="info-row">
+                <span class="info-label">城市</span>
+                <span class="info-value">{{ locationText || '暂无城市信息' }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">景点地址</span>
+                <div class="info-value address-row">
+                  <span class="address-text">{{ addressText }}</span>
+                  <el-tooltip :disabled="hasCoords" content="暂无地理位置信息" placement="top">
+                    <span class="map-btn-wrap">
+                      <el-button size="small" round :disabled="!hasCoords" @click="openSpotMap">
+                        <el-icon class="map-btn-icon"><Location /></el-icon>
+                        查看地图
+                      </el-button>
+                    </span>
+                  </el-tooltip>
+                </div>
+              </div>
+              <div class="info-row">
+                <span class="info-label">标签</span>
+                <span v-if="tagList.length" class="info-value tag-list">
+                  <el-tag v-for="t in tagList" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
+                </span>
+                <span v-else class="info-value">暂无标签</span>
+              </div>
             </div>
-            <div class="info-item">
-              <span class="info-label">地址</span>
-              <span class="info-value">{{ addressText }}</span>
+          </section>
+
+          <section class="content-card">
+            <h2 class="card-title">票价信息</h2>
+            <div class="info-list">
+              <div class="info-row">
+                <span class="info-label">原票价</span>
+                <span class="info-value price-value">{{ priceText }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">优惠票价</span>
+                <span class="info-value">{{ discountPriceText }}</span>
+              </div>
+              <div class="info-row">
+                <span class="info-label">门票备注</span>
+                <span class="info-value">{{ ticketNoteText }}</span>
+              </div>
             </div>
-            <div class="info-item">
-              <span class="info-label">评分</span>
-              <span class="info-value">{{ scoreText }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">热度</span>
-              <span class="info-value">{{ heat }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">门票</span>
-              <span class="info-value">{{ priceText }}</span>
-            </div>
-            <div class="info-item">
-              <span class="info-label">建议游玩时长</span>
-              <span class="info-value">—</span>
-            </div>
-            <div class="info-item info-item--full">
-              <span class="info-label">标签</span>
-              <span v-if="tagList.length" class="info-value tag-list">
-                <el-tag v-for="t in tagList" :key="t" size="small" type="info" effect="plain">{{ t }}</el-tag>
-              </span>
-              <span v-else class="info-value">—</span>
-            </div>
-          </div>
-        </section>
+          </section>
+        </div>
 
         <section class="content-card">
           <h2 class="card-title">景点介绍</h2>
           <template v-if="descParagraphs.length">
-            <p class="desc-text">{{ descParagraphs[0] }}</p>
-            <img
-              v-if="spot.cover"
-              class="desc-image"
-              :src="spot.cover"
-              :alt="spot.name || '景点图片'"
-            />
-            <p v-for="(para, idx) in descParagraphs.slice(1)" :key="idx" class="desc-text">{{ para }}</p>
+            <p v-for="(para, idx) in descParagraphs" :key="idx" class="desc-text">{{ para }}</p>
           </template>
           <p v-else class="desc-empty">暂无介绍</p>
         </section>
@@ -199,8 +206,8 @@
         </section>
       </div>
 
-      <!-- ========== ⑥ 用户点评 ========== -->
-      <div v-else-if="activeTab === 'comment'" class="tab-panel">
+      <!-- ========== ⑥ 用户点评（独立卡片，仅“景点介绍”Tab 下显示） ========== -->
+      <div v-if="activeTab === 'intro'" class="tab-panel comment-standalone">
         <section class="content-card sentiment-card">
           <div class="sentiment-chart-wrap">
             <div v-if="sentimentLoading" v-loading="sentimentLoading" class="emotion-chart chart-loading"></div>
@@ -248,6 +255,23 @@
         </section>
       </div>
     </div>
+
+    <el-dialog
+      v-model="mapDialogVisible"
+      width="720px"
+      class="spot-map-dialog"
+      append-to-body
+      @opened="initSpotMap"
+      @closed="destroySpotMap"
+    >
+      <template #header>
+        <div class="map-dialog-head">
+          <span class="map-dialog-name">{{ spot.name || '景点地图' }}</span>
+          <el-tag v-if="levelText" size="small" effect="dark" type="warning">{{ levelText }}</el-tag>
+        </div>
+      </template>
+      <div ref="mapContainerRef" class="spot-map"></div>
+    </el-dialog>
   </div>
 </template>
 
@@ -266,6 +290,7 @@ import { getSpotSentiment, getPostList, getCommentList } from '@/api/post'
 import { getMyTrips, getTripDetail } from '@/api/trip'
 import { getOnShelfHotels } from '@/api/hotel'
 import { auth } from '@/utils/auth'
+import { loadAMap } from '@/utils/amap'
 
 echarts.use([PieChart, TooltipComponent, LegendComponent, CanvasRenderer])
 
@@ -290,8 +315,7 @@ const activeTab = ref('intro')
 const tabs = [
   { key: 'intro', label: '景点介绍' },
   { key: 'route', label: '推荐路线' },
-  { key: 'hotel', label: '周边酒店' },
-  { key: 'comment', label: '用户点评' }
+  { key: 'hotel', label: '周边酒店' }
 ]
 
 const relatedPosts = ref([])
@@ -351,6 +375,28 @@ const priceText = computed(() => {
   const num = Number(price)
   if (!Number.isFinite(num)) return '—'
   return num > 0 ? `¥${num}` : '免费'
+})
+
+// 后端 SpotOut 目前没有距离/优惠价/备注字段，这里做兼容读取，缺失时回退占位文案
+const pickFirst = (source, keys) => {
+  for (const key of keys) {
+    const value = source?.[key]
+    if (value !== null && value !== undefined && value !== '') return value
+  }
+  return null
+}
+
+const discountPriceText = computed(() => {
+  const raw = pickFirst(spot.value, ['discount_price', 'discounted_price', 'sale_price', 'promo_price'])
+  if (raw === null) return '暂无优惠票价'
+  const num = Number(raw)
+  if (!Number.isFinite(num)) return String(raw)
+  return num > 0 ? `¥${num}` : '免费'
+})
+
+const ticketNoteText = computed(() => {
+  const raw = pickFirst(spot.value, ['ticket_note', 'ticket_notice', 'notice', 'remark'])
+  return raw === null ? '暂无备注' : String(raw)
 })
 
 const descriptionText = computed(() => {
@@ -697,6 +743,80 @@ const loadSpotDetail = async () => {
   }
 }
 
+/* ---------- 景点地图弹窗 ---------- */
+const mapDialogVisible = ref(false)
+const mapContainerRef = ref(null)
+let amapApi = null
+let spotMapInstance = null
+
+const hasCoords = computed(() => {
+  const rawLat = spot.value?.lat
+  const rawLng = spot.value?.lng
+  if (rawLat === null || rawLat === undefined || rawLat === '') return false
+  if (rawLng === null || rawLng === undefined || rawLng === '') return false
+  const lat = Number(rawLat)
+  const lng = Number(rawLng)
+  return Number.isFinite(lat) && Number.isFinite(lng) && Math.abs(lat) <= 90 && Math.abs(lng) <= 180 && !(lat === 0 && lng === 0)
+})
+
+// 数据库暂无官方等级字段，这里按评分折算展示（AAAAA ~ A），评分缺失时不显示
+const levelText = computed(() => {
+  const num = Number(spot.value?.score)
+  if (!Number.isFinite(num) || num <= 0) return ''
+  if (num >= 4.8) return 'AAAAA'
+  if (num >= 4.5) return 'AAAA'
+  if (num >= 4.2) return 'AAA'
+  if (num >= 4.0) return 'AA'
+  return 'A'
+})
+
+const openSpotMap = () => {
+  if (!hasCoords.value) return
+  mapDialogVisible.value = true
+}
+
+const destroySpotMap = () => {
+  if (spotMapInstance) {
+    spotMapInstance.destroy()
+    spotMapInstance = null
+  }
+}
+
+const initSpotMap = async () => {
+  if (!hasCoords.value || !mapContainerRef.value) return
+  const lng = Number(spot.value.lng)
+  const lat = Number(spot.value.lat)
+  try {
+    amapApi = amapApi || (await loadAMap())
+  } catch (e) {
+    ElMessage.warning('地图加载失败，请稍后重试')
+    mapDialogVisible.value = false
+    return
+  }
+  if (!mapContainerRef.value) return
+  destroySpotMap()
+  spotMapInstance = new amapApi.Map(mapContainerRef.value, {
+    zoom: 15,
+    center: [lng, lat],
+    resizeEnable: true,
+    dragEnable: true,
+    scrollWheel: true,
+    doubleClickZoom: true,
+    logoPosition: 'RB'
+  })
+  // 部分高德 2.0 版本需显式开启交互状态
+  if (typeof spotMapInstance.setStatus === 'function') {
+    spotMapInstance.setStatus({ scrollWheel: true, dragEnable: true })
+  }
+  const marker = new amapApi.Marker({
+    position: [lng, lat],
+    title: spot.value.name || ''
+  })
+  spotMapInstance.add(marker)
+  // 自动适配缩放层级，同时保留周边地理信息（最高 17 级，避免过度放大丢失参照）
+  spotMapInstance.setFitView([marker], false, [60, 60, 60, 60], 17)
+}
+
 /* ---------- 分享 / 跳转 ---------- */
 const copyShareLink = async () => {
   const link = window.location.href
@@ -741,16 +861,18 @@ const loadAll = async () => {
 watch(
   () => route.params.id,
   () => {
+    mapDialogVisible.value = false
+    destroySpotMap()
     loadAll()
   }
 )
 
-// 图表容器只在点评 Tab 里；切回点评时用缓存数据重绘，离开时销毁避免 resize 已卸载节点
+// 点评区只在“景点介绍”Tab 下挂载：返回时用缓存数据重绘饼图，离开时销毁避免 resize 已卸载节点
 watch(activeTab, async (tab) => {
-  if (tab === 'comment') {
+  if (tab === 'intro') {
     if (sentimentData && sentimentTotal.value > 0) {
       await nextTick()
-      initChart(sentimentData)
+      if (chartRef.value) initChart(sentimentData)
     }
   } else if (chartInstance) {
     chartInstance.dispose()
@@ -763,6 +885,7 @@ onMounted(() => {
 })
 
 onBeforeUnmount(() => {
+  destroySpotMap()
   if (chartInstance) {
     chartInstance.dispose()
     chartInstance = null
@@ -988,12 +1111,64 @@ onBeforeUnmount(() => {
   gap: 20px;
 }
 .content-card {
-  padding: 24px;
+  padding: 22px 24px;
   background: #fff;
-  border: none;
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+  border: 2px solid #222;
+  border-radius: 16px;
+  box-shadow: 4px 4px 0 rgba(34, 34, 34, 0.1);
   box-sizing: border-box;
+}
+.info-cards {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+.info-list {
+  display: flex;
+  flex-direction: column;
+}
+.info-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 11px 0;
+  border-bottom: 1px dashed rgba(34, 34, 34, 0.1);
+}
+.info-row:first-child {
+  padding-top: 0;
+}
+.info-row:last-child {
+  padding-bottom: 0;
+  border-bottom: none;
+}
+.info-row .info-label {
+  flex-shrink: 0;
+  width: 96px;
+  font-size: 13px;
+  font-weight: 600;
+  color: #7b8794;
+}
+.info-row .info-value {
+  flex: 1;
+  min-width: 0;
+  font-size: 14.5px;
+  color: #222;
+}
+.address-text {
+  flex: 1;
+  min-width: 0;
+  word-break: break-word;
+}
+.price-value {
+  font-weight: 700;
+  color: #f06818;
+}
+@media (max-width: 900px) {
+  .info-cards {
+    grid-template-columns: 1fr;
+    gap: 16px;
+  }
 }
 .card-title {
   margin: 0 0 18px;
@@ -1035,6 +1210,20 @@ onBeforeUnmount(() => {
 .tag-list :deep(.el-tag) {
   border-radius: 999px;
 }
+.address-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+.map-btn-wrap {
+  display: inline-flex;
+}
+.map-btn-icon {
+  margin-right: 4px;
+  font-size: 14px;
+}
 
 /* ================= F. 图文介绍卡 ================= */
 .desc-text {
@@ -1047,14 +1236,6 @@ onBeforeUnmount(() => {
 }
 .desc-text:last-child {
   margin-bottom: 0;
-}
-.desc-image {
-  display: block;
-  width: 100%;
-  max-height: 320px;
-  margin: 0 0 16px;
-  border-radius: 8px;
-  object-fit: cover;
 }
 .desc-empty {
   margin: 0;
@@ -1466,5 +1647,48 @@ onBeforeUnmount(() => {
   .trip-empty {
     padding: 30px 16px;
   }
+}
+</style>
+
+<style>
+/* 景点地图弹窗（append-to-body，需全局样式） */
+.spot-map-dialog .el-dialog__header {
+  padding: 16px 20px 4px;
+  margin-right: 0;
+}
+.spot-map-dialog .el-dialog__headerbtn {
+  top: 10px;
+  right: 6px;
+}
+.spot-map-dialog .el-dialog__body {
+  padding: 8px 20px 20px;
+}
+.spot-map-dialog .map-dialog-head {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.spot-map-dialog .map-dialog-name {
+  font-size: 17px;
+  font-weight: 600;
+  color: #2c3e50;
+}
+.spot-map-dialog .spot-map {
+  width: 100%;
+  height: 420px;
+  border-radius: 10px;
+  overflow: hidden;
+  background: #f5f7fa;
+}
+/* 高德版权水印固定到右下角（保留官方 logo 与版权文字，不隐藏） */
+.spot-map-dialog .amap-logo {
+  left: auto !important;
+  right: 22px !important;
+  bottom: 20px !important;
+}
+.spot-map-dialog .amap-copyright {
+  left: auto !important;
+  right: 22px !important;
+  bottom: 2px !important;
 }
 </style>

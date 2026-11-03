@@ -227,7 +227,7 @@ onMounted(fetchRooms)
 .card-title { font-weight: 600; }
 .room-card {
   background: #fff;
-  border: 1px solid #ebeef5;
+  border: 2px solid #222;
   border-radius: 10px;
   overflow: hidden;
   margin-bottom: 16px;

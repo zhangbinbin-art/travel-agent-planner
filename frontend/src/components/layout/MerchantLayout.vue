@@ -1,7 +1,10 @@
 <template>
   <div class="merchant-layout">
     <header class="merchant-header">
-      <div class="brand">酒店商家后台</div>
+      <div class="brand">
+        <span class="brand-logo">TR</span>
+        <span class="brand-text">商家中心</span>
+      </div>
       <div class="header-right">
         <span class="welcome">欢迎，{{ auth.username || '商家' }}</span>
         <el-button text type="danger" @click="handleLogout">退出登录</el-button>
@@ -44,21 +47,44 @@ const handleLogout = () => {
   min-height: 100vh;
   display: flex;
   flex-direction: column;
-  background: #f7f8fa;
+  background: #e8f4ff;
 }
 .merchant-header {
-  height: 60px;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 0 24px;
-  background: #1f2d3d;
-  color: #fff;
+  margin: 12px 20px 0;
+  padding: 10px 18px;
+  background: #fff;
+  border: 2px solid #222;
+  border-radius: 18px;
+  box-shadow: 4px 4px 0 rgba(34, 34, 34, 0.1);
+  color: #222;
 }
 .brand {
-  font-size: 18px;
-  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  font-size: 16px;
+  font-weight: 800;
   letter-spacing: 1px;
+  color: #222;
+}
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border-radius: 10px;
+  background: #ff7a2f;
+  border: 2px solid #222;
+  color: #fff;
+  font-size: 13px;
+  font-weight: 800;
+}
+.brand-text {
+  color: #222;
 }
 .header-right {
   display: flex;
@@ -66,7 +92,7 @@ const handleLogout = () => {
   gap: 12px;
 }
 .welcome {
-  color: #cfd8e3;
+  color: #5a6472;
   font-size: 14px;
 }
 .merchant-body {
@@ -74,13 +100,18 @@ const handleLogout = () => {
   flex: 1;
 }
 .merchant-sidebar {
-  width: 200px;
+  width: 208px;
+  margin: 16px 0 16px 20px;
+  padding: 8px;
   background: #fff;
-  border-right: 1px solid #ebeef5;
+  border: 2px solid #222;
+  border-radius: 16px;
+  box-shadow: 4px 4px 0 rgba(34, 34, 34, 0.1);
+  align-self: flex-start;
 }
 .merchant-main {
   flex: 1;
-  padding: 20px;
+  padding: 16px 20px 24px;
   min-width: 0;
 }
 </style>

@@ -1,7 +1,40 @@
 <template>
-  <div class="register">
-    <el-card class="register-card">
-      <template #header>注册</template>
+  <div class="register-page">
+    <svg
+      class="register-scene"
+      viewBox="0 0 1440 900"
+      preserveAspectRatio="xMidYMax slice"
+      aria-hidden="true"
+    >
+      <circle cx="1130" cy="180" r="86" fill="#ffe1b8" />
+      <ellipse cx="1130" cy="180" r="118" fill="#ffeccc" opacity="0.55" />
+      <g fill="#ffffff" opacity="0.85">
+        <ellipse cx="250" cy="170" rx="78" ry="30" />
+        <ellipse cx="310" cy="158" rx="58" ry="24" />
+        <ellipse cx="860" cy="140" rx="66" ry="26" />
+        <ellipse cx="912" cy="132" rx="48" ry="20" />
+      </g>
+      <path d="M0 660 L190 470 L330 610 L470 430 L640 660 Z" fill="#bfe0ff" opacity="0.75" />
+      <path d="M420 660 L610 500 L760 640 L920 470 L1120 660 Z" fill="#a9d4ff" opacity="0.6" />
+      <path d="M0 700 C240 640 420 740 660 700 C900 660 1080 740 1440 690 L1440 900 L0 900 Z" fill="#d7ecff" />
+      <path d="M0 780 C260 730 480 800 740 760 C980 724 1180 790 1440 752 L1440 900 L0 900 Z" fill="#c3e2ff" opacity="0.85" />
+      <g opacity="0.9">
+        <path d="M300 742 L350 660 L400 742 Z" fill="#ffd2a8" />
+        <path d="M350 742 L350 660" stroke="#e9a86f" stroke-width="4" />
+        <circle cx="350" cy="648" r="6" fill="#ffb073" />
+      </g>
+    </svg>
+
+    <el-card class="register-card" shadow="never">
+      <header class="register-brand">
+        <span class="brand-logo">TR</span>
+        <div class="brand-text">
+          <h1 class="brand-name">旅游规划平台</h1>
+          <span class="brand-en">Travel Route</span>
+        </div>
+      </header>
+      <p class="register-welcome">创建账号 · Join Us</p>
+
       <el-form ref="formRef" label-width="80px" :model="form" :rules="rules" @submit.prevent>
         <el-form-item label="账号类型" prop="role">
           <el-radio-group v-model="form.role">
@@ -21,8 +54,8 @@
         <el-form-item label="确认密码" prop="confirm">
           <el-input v-model="form.confirm" type="password" placeholder="请确认密码" show-password />
         </el-form-item>
-        <el-form-item>
-          <el-button type="primary" @click="handleRegister" :loading="loading">注册</el-button>
+        <el-form-item class="register-actions">
+          <el-button type="primary" class="register-btn" @click="handleRegister" :loading="loading">注册</el-button>
           <el-button text @click="$router.push('/login')">已有账号，去登录</el-button>
         </el-form-item>
       </el-form>
@@ -152,34 +185,101 @@ const handleRegister = () => {
 </script>
 
 <style scoped>
-.register {
+.register-page {
+  position: relative;
   display: flex;
   align-items: center;
   justify-content: center;
   min-height: 100vh;
-  background-image: url('https://images.unsplash.com/photo-1506905925346-21bda4d32df4?auto=format&fit=crop&w=1920&q=80');
-  background-size: cover;
-  background-position: center;
-  background-repeat: no-repeat;
-  position: relative;
-  padding: 20px;
+  padding: 32px 20px;
+  background: linear-gradient(180deg, #eef7ff 0%, #e8f4ff 45%, #dceeff 100%);
+  overflow: hidden;
 }
 
-.register::before {
-  content: '';
+.register-scene {
   position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  background: rgba(15, 28, 63, 0.45);
-  z-index: 0;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  pointer-events: none;
+  opacity: 0.5;
 }
 
 .register-card {
-  width: 420px;
   position: relative;
   z-index: 1;
+  width: 100%;
+  max-width: 460px;
+  background: #fff;
+  border: 2px solid #222;
+  border-radius: 24px;
+  box-shadow: 6px 6px 0 rgba(34, 34, 34, 0.14);
+}
+
+.register-card :deep(.el-card__body) {
+  padding: 28px 28px 22px;
+}
+
+.register-brand {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+}
+
+.brand-logo {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 40px;
   border-radius: 12px;
+  background: #ff7a2f;
+  border: 2px solid #222;
+  color: #fff;
+  font-size: 14px;
+  font-weight: 800;
+  letter-spacing: 0.5px;
+  box-shadow: 2px 2px 0 rgba(34, 34, 34, 0.16);
+}
+
+.brand-text {
+  display: flex;
+  flex-direction: column;
+  line-height: 1.2;
+}
+
+.brand-name {
+  margin: 0;
+  font-size: 20px;
+  font-weight: 800;
+  color: #222;
+}
+
+.brand-en {
+  font-size: 12px;
+  letter-spacing: 1.6px;
+  color: #7b8794;
+}
+
+.register-welcome {
+  margin: 20px 0 18px;
+  text-align: center;
+  font-size: 13px;
+  font-weight: 600;
+  color: #5a6472;
+  letter-spacing: 0.6px;
+}
+
+.register-actions {
+  margin-top: 8px;
+  margin-bottom: 0;
+}
+
+.register-btn {
+  min-width: 108px;
+  height: 40px;
+  font-weight: 700;
+  letter-spacing: 2px;
 }
 </style>

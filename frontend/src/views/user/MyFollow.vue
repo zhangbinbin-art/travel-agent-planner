@@ -100,7 +100,8 @@ const handlePageChange = (p) => {
   fetchList()
 }
 
-const goSpace = (id) => router.push(`/user/space/${id}`)
+// 统一跳转到新版用户主页 /user/:userId
+const goSpace = (id) => router.push(`/user/${id}`)
 
 onMounted(fetchList)
 </script>
@@ -132,8 +133,8 @@ onMounted(fetchList)
   gap: 14px;
   padding: 12px 16px;
   background: #fff;
-  border: 1px solid #e5e7eb;
-  border-radius: 12px;
+  border: 2px solid #222;
+  border-radius: 14px;
   cursor: pointer;
   transition: box-shadow 0.2s ease, transform 0.2s ease, border-color 0.2s ease;
 }
