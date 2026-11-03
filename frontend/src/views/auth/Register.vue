@@ -48,6 +48,9 @@
         <el-form-item label="用户名" prop="username">
           <el-input v-model="form.username" placeholder="请输入用户名" clearable />
         </el-form-item>
+        <el-form-item label="手机号" prop="phone">
+          <el-input v-model="form.phone" placeholder="请输入 11 位手机号" maxlength="11" clearable />
+        </el-form-item>
         <el-form-item label="密码" prop="password">
           <el-input v-model="form.password" type="password" placeholder="请输入密码" show-password />
         </el-form-item>
@@ -65,18 +68,22 @@
 
 <script setup>
 import { reactive, ref } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import api from '@/api'
 
 const router = useRouter()
+const route = useRoute()
 const formRef = ref()
 const loading = ref(false)
+// 从登录页「商家端」进入时预选商户身份：/register?role=merchant
+const initialRole = route.query.role === 'merchant' ? 'merchant' : 'user'
 const form = reactive({
   username: '',
+  phone: '',
   password: '',
   confirm: '',
-  role: 'user',
+  role: initialRole,
   shop_name: ''
 })
 
@@ -85,14 +92,9 @@ const validatePassword = (rule, value, callback) => {
     callback(new Error('请输入密码'))
     return
   }
-  if (value.length < 6 || value.length > 12) {
-    callback(new Error('密码长度需为6~12位'))
-    return
-  }
-  const hasLetter = /[A-Za-z]/.test(value)
-  const hasDigit = /[0-9]/.test(value)
-  if (!(hasLetter && hasDigit)) {
-    callback(new Error('密码必须包含字母和数字'))
+  // 注册密码改为纯数字，6~12 位
+  if (!/^\d{6,12}$/.test(value)) {
+    callback(new Error('密码需为 6~12 位数字'))
     return
   }
   callback()
@@ -115,6 +117,10 @@ const rules = {
     { required: true, message: '请输入用户名', trigger: 'blur' },
     { min: 3, max: 50, message: '用户名长度需为3~50位', trigger: 'blur' }
   ],
+  phone: [
+    { required: true, message: '请输入手机号', trigger: 'blur' },
+    { pattern: /^1\d{10}$/, message: '请输入 11 位手机号', trigger: 'blur' }
+  ],
   password: [
     { required: true, validator: validatePassword, trigger: 'blur' }
   ],
@@ -133,6 +139,7 @@ const handleRegister = () => {
     try {
       await api.post('/api/v1/user/register', {
         username: form.username,
+        phone: form.phone,
         password: form.password,
         role: form.role,
         shop_name: form.role === 'merchant' ? form.shop_name : undefined

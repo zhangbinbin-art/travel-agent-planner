@@ -4,13 +4,19 @@ from typing import Optional
 class UserRegister(BaseModel):
     username: str = Field(min_length=3, max_length=50)
     password: str = Field(min_length=6, max_length=50)
+    # 用户 / 商家注册必填手机号
+    phone: Optional[str] = Field(default=None, max_length=20)
     email: Optional[str] = None
     role: Optional[str] = "user"  # user / merchant
     shop_name: Optional[str] = None
 
 class UserLogin(BaseModel):
-    username: str
+    # 账号密码登录（管理员 / 兼容旧账号）
+    username: Optional[str] = None
     password: str
+    # 手机号登录：phone + role_type（user / shop）
+    phone: Optional[str] = None
+    role_type: Optional[str] = None
 
 class UserOut(BaseModel):
     id: int
@@ -19,6 +25,7 @@ class UserOut(BaseModel):
     audit_status: Optional[str] = "approved"
     shop_name: Optional[str] = None
     email: Optional[str] = None
+    phone: Optional[str] = None
     is_real_name_auth: Optional[bool] = False
     real_name: Optional[str] = None
     id_card: Optional[str] = None

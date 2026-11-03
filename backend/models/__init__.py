@@ -22,6 +22,8 @@ class User(Base):
     # 商户绑定的唯一酒店（一个商户账号只管理一家酒店）
     merchant_hotel_id = Column(Integer, ForeignKey("hotels.id"), nullable=True)
     email = Column(String(100), unique=True)
+    # 注册手机号（用户/商家注册必填）
+    phone = Column(String(20), index=True, nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
 

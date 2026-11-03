@@ -20,16 +20,22 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
     if db.query(User).filter(User.username == user_in.username).first():
         raise HTTPException(status_code=400, detail="Username already exists")
     pwd = user_in.password or ""
-    if len(pwd) < 6 or len(pwd) > 12:
-        raise HTTPException(status_code=400, detail="密码必须包含字母和数字")
-    if not re.search(r'[A-Za-z]', pwd) or not re.search(r'[0-9]', pwd):
-        raise HTTPException(status_code=400, detail="密码必须包含字母和数字")
+    # 注册密码改为纯数字，长度 6~12 位
+    if not re.fullmatch(r"\d{6,12}", pwd):
+        raise HTTPException(status_code=400, detail="密码需为 6~12 位数字")
+    # 用户 / 商家注册必须填写手机号
+    phone = str(user_in.phone or "").strip()
+    if not re.fullmatch(r"1\d{10}", phone):
+        raise HTTPException(status_code=400, detail="请输入 11 位手机号")
+    if db.query(User).filter(User.phone == phone).first():
+        raise HTTPException(status_code=400, detail="该手机号已注册")
     role = (user_in.role or "user").strip().lower()
     if role not in ("user", "merchant"):
         raise HTTPException(status_code=400, detail="注册角色只能为 user 或 merchant")
     user = User(
         username=user_in.username,
         password_hash=get_password_hash(user_in.password),
+        phone=phone,
         email=user_in.email,
         role=role,
         # 商家注册后默认待审核，管理员审核通过后才能进入商家后台
@@ -44,9 +50,36 @@ def register(user_in: UserRegister, db: Session = Depends(get_db)):
 
 @router.post("/login", response_model=Token)
 def login(user_in: UserLogin, db: Session = Depends(get_db)):
-    user = db.query(User).filter(User.username == user_in.username).first()
-    if not user or not verify_password(user_in.password, user.password_hash):
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
+    """登录：管理员/旧账号用 username+password；普通用户与商户用 phone+role_type。"""
+    phone = str(user_in.phone or "").strip()
+    if phone:
+        # 手机号登录：role_type=shop 查商户记录，否则查普通用户记录
+        role_type = str(user_in.role_type or "user").strip().lower()
+        if role_type not in ("user", "shop", "merchant"):
+            # 管理员不走手机号登录
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="该手机号下没有对应身份的账号",
+            )
+        role = "merchant" if role_type in ("shop", "merchant") else "user"
+        user = (
+            db.query(User)
+            .filter(User.phone == phone, User.role == role)
+            .first()
+        )
+        if not user:
+            raise HTTPException(
+                status_code=status.HTTP_401_UNAUTHORIZED,
+                detail="该手机号下没有对应身份的账号",
+            )
+        if not verify_password(user_in.password, user.password_hash):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
+    else:
+        if not user_in.username:
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
+        user = db.query(User).filter(User.username == user_in.username).first()
+        if not user or not verify_password(user_in.password, user.password_hash):
+            raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="账号或密码错误")
     token = create_access_token({"sub": str(user.id), "role": user.role})
     return {
         "access_token": token,

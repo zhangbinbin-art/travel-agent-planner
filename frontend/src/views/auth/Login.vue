@@ -50,9 +50,22 @@
 
       <p class="login-welcome">欢迎回来 · Welcome Back</p>
 
+      <div class="role-switch">
+        <button
+          v-for="item in roleOptions"
+          :key="item.value"
+          type="button"
+          class="role-tab"
+          :class="{ 'is-active': roleType === item.value }"
+          @click="switchRole(item.value)"
+        >
+          {{ item.label }}
+        </button>
+      </div>
+
       <el-form :model="form" class="login-form" @submit.prevent>
         <el-form-item class="form-item">
-          <el-input v-model="form.username" placeholder="账号" clearable size="large">
+          <el-input v-model="form.username" :placeholder="accountPlaceholder" clearable size="large">
             <template #prefix>
               <el-icon><User /></el-icon>
             </template>
@@ -87,20 +100,26 @@
 
       <div class="login-links">
         <span class="link-muted">还没有账号？</span>
-        <span class="link-item" @click="$router.push('/register')">立即注册</span>
+        <span class="link-item" @click="goRegister">立即注册</span>
       </div>
 
       <div class="account-tip">
-        <div>普通用户：favtest1 / abc123</div>
-        <div>商家：shop01 / 123456</div>
-        <div>管理员：admin / admin123</div>
+        <template v-if="roleType === 'user'">
+          <div>普通用户：手机号 13800000000 / 123456</div>
+          <div>也可用账号 favtest1 / 123456 登录</div>
+        </template>
+        <template v-else>
+          <div>商家：手机号 13800000000 / 123456</div>
+          <div>也可用账号 shop01 / 123456 登录</div>
+        </template>
+        <div class="account-tip-admin">管理员：admin / 123456（账号密码登录）</div>
       </div>
     </section>
   </div>
 </template>
 
 <script setup>
-import { reactive, ref } from 'vue'
+import { computed, reactive, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { User, Lock } from '@element-plus/icons-vue'
@@ -114,6 +133,29 @@ const form = reactive({
   username: '',
   password: ''
 })
+
+// 登录身份：user = 普通用户（手机号查 user 记录）/ shop = 商户（手机号查 merchant 记录）
+const roleType = ref('user')
+const roleOptions = [
+  { value: 'user', label: '普通用户' },
+  { value: 'shop', label: '商家端' }
+]
+const accountPlaceholder = computed(() =>
+  roleType.value === 'shop' ? '商户手机号' : '手机号'
+)
+
+const switchRole = (value) => {
+  if (roleType.value === value) return
+  roleType.value = value
+  // 切换身份时清空账号，避免把上一次的手机号带到另一个身份下
+  form.username = ''
+  form.password = ''
+}
+
+const goRegister = () => {
+  if (roleType.value === 'shop') router.push({ path: '/register', query: { role: 'merchant' } })
+  else router.push('/register')
+}
 
 const resolveRedirect = () => {
   const raw = route.query.redirect
@@ -138,7 +180,12 @@ const handleLogin = async () => {
   }
   loading.value = true
   try {
-    const res = await api.post('/api/v1/user/login', form)
+    // 11 位数字按手机号登录（带身份）；否则按账号密码登录（管理员 / 兼容旧账号）
+    const isPhone = /^1\d{10}$/.test(form.username.trim())
+    const payload = isPhone
+      ? { phone: form.username.trim(), password: form.password, role_type: roleType.value }
+      : { username: form.username.trim(), password: form.password }
+    const res = await api.post('/api/v1/user/login', payload)
     const { access_token, role, audit_status } = res.data || {}
     // 商家未审核：提示并留在登录页，不写入登录状态
     if (role === 'merchant' && audit_status !== 'approved') {
@@ -283,6 +330,37 @@ const handleLogin = async () => {
   letter-spacing: 4px;
 }
 
+.role-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 8px;
+  margin-bottom: 18px;
+}
+
+.role-tab {
+  padding: 9px 0;
+  border: 2px solid rgba(34, 34, 34, 0.16);
+  border-radius: 10px;
+  background: #fff;
+  color: #5a6472;
+  font-size: 14px;
+  font-weight: 700;
+  cursor: pointer;
+  transition: all 0.16s ease;
+}
+
+.role-tab:hover {
+  border-color: #222;
+  background: #fff7ef;
+}
+
+.role-tab.is-active {
+  border-color: #ff7a2f;
+  background: #ff7a2f;
+  color: #fff;
+  box-shadow: 2px 2px 0 rgba(34, 34, 34, 0.12);
+}
+
 .login-links {
   display: flex;
   align-items: center;
@@ -304,6 +382,12 @@ const handleLogin = async () => {
 
 .link-item:hover {
   text-decoration: underline;
+}
+
+.account-tip-admin {
+  margin-top: 4px;
+  color: #a8b3c0;
+  font-size: 11.5px;
 }
 
 .account-tip {
