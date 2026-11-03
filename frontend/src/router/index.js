@@ -26,7 +26,6 @@ const routes = [
       { path: 'user/my-follow', name: 'MyFollow', component: () => import('@/views/user/MyFollow.vue') },
       { path: 'user/my-fans', name: 'MyFans', component: () => import('@/views/user/MyFans.vue') },
       { path: 'user/:userId', name: 'UserProfile', component: () => import('@/views/user/UserProfile.vue') },
-      { path: 'user/space/:userId', name: 'UserSpace', component: () => import('@/views/user/UserSpace.vue') },
       { path: 'plan', name: 'Plan', meta: { keepAlive: true }, component: () => import('@/views/plan/Plan.vue') },
       { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') },
       { path: 'admin/post-review', name: 'AdminPostReview', component: () => import('@/views/admin/PostReview.vue') },
