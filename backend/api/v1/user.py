@@ -234,6 +234,44 @@ def list_user_posts(
     return data
 
 
+@router.get("/my-comments")
+def my_comments(
+    page: int = Query(1, ge=1),
+    page_size: int = Query(20, ge=1, le=100),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """我发表的评论（含审核状态与所属游记标题）。"""
+    from models import Comment, Post
+
+    query = db.query(Comment).filter(Comment.user_id == current_user.id)
+    total = query.count()
+    rows = (
+        query.order_by(Comment.id.desc())
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+        .all()
+    )
+    post_ids = {row.post_id for row in rows}
+    posts = {p.id: p for p in db.query(Post).filter(Post.id.in_(post_ids)).all()} if post_ids else {}
+    status_text = {0: "待审核", 1: "已通过", 2: "已驳回"}
+    items = []
+    for row in rows:
+        post = posts.get(row.post_id)
+        items.append(
+            {
+                "id": row.id,
+                "content": row.content,
+                "status": row.status,
+                "status_text": status_text.get(row.status, ""),
+                "created_at": row.created_at,
+                "post_id": row.post_id,
+                "post_title": post.title if post else None,
+            }
+        )
+    return {"items": items, "total": total}
+
+
 # ---------- 私聊 ----------
 
 @router.get("/message/conversations", response_model=ConversationListResponse)

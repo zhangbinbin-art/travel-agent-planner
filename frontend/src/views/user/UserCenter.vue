@@ -63,9 +63,8 @@
         </el-tab-pane>
 
         <el-tab-pane label="我的评论" name="comment" lazy>
-          <!-- TODO(backend): GET /api/v1/user/comments 提供后，用真实评论列表替换此处空态。 -->
           <div class="embedded-pane">
-            <EmptyState description="暂无评论" hint="你在游记下的评论会显示在这里" />
+            <MyComment />
           </div>
         </el-tab-pane>
 
@@ -101,6 +100,7 @@ import MyPlan from '@/views/user/MyPlan.vue'
 import MyBooking from '@/views/user/MyBooking.vue'
 import MyLikePost from '@/views/user/MyLikePost.vue'
 import MyPost from '@/views/user/MyPost.vue'
+import MyComment from '@/views/user/MyComment.vue'
 import MyFollow from '@/views/user/MyFollow.vue'
 import MyFans from '@/views/user/MyFans.vue'
 import EmptyState from '@/components/EmptyState.vue'

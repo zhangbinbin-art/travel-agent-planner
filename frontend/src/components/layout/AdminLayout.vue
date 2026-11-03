@@ -21,6 +21,7 @@
             <el-menu-item index="/admin/post-audit">游记审核</el-menu-item>
             <el-menu-item index="/admin/comment-audit">评论审核</el-menu-item>
           </el-sub-menu>
+          <el-menu-item index="/admin/data">平台数据</el-menu-item>
           <el-sub-menu index="merchant">
             <template #title>商家审核</template>
             <el-menu-item index="/admin/merchant-audit?tab=profile">酒店资料审核</el-menu-item>

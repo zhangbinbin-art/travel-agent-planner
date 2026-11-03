@@ -5,7 +5,7 @@ status 语义（单条发送限流的核心状态）：
 - normal：该消息是「回复」，发出后不再限制对方
 """
 
-from sqlalchemy import Column, DateTime, ForeignKey, Index, Integer, String, Text
+from sqlalchemy import Boolean, Column, DateTime, ForeignKey, Index, Integer, String, Text
 from sqlalchemy.sql import func
 
 from core.database import Base
@@ -27,6 +27,8 @@ class Message(Base):
         default=MESSAGE_NORMAL,
         server_default=MESSAGE_NORMAL,
     )
+    # 已读标记：接收方打开会话后置为已读
+    is_read = Column(Boolean, nullable=False, default=False, server_default="0")
     create_time = Column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (Index("ix_messages_pair", "sender_id", "receiver_id", "id"),)

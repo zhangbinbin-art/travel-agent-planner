@@ -110,14 +110,6 @@
                 <span class="info-label">原票价</span>
                 <span class="info-value price-value">{{ priceText }}</span>
               </div>
-              <div class="info-row">
-                <span class="info-label">优惠票价</span>
-                <span class="info-value">{{ discountPriceText }}</span>
-              </div>
-              <div class="info-row">
-                <span class="info-label">门票备注</span>
-                <span class="info-value">{{ ticketNoteText }}</span>
-              </div>
             </div>
           </section>
         </div>

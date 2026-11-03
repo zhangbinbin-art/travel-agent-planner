@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from core.database import get_db
-from api.deps import get_current_user
+from api.deps import get_current_user, get_optional_user
 from models import User, Post, Comment, PostFavorite
 from schemas.post import (
     PostCreate,
@@ -55,12 +55,13 @@ def list_posts(
     status: str = Query(""),
     spot_id: int = Query(None),
     db: Session = Depends(get_db),
-    current_user: User = Depends(get_current_user),
+    current_user: User = Depends(get_optional_user),
 ):
     if sort not in ("latest", "hot"):
         sort = "latest"
+    viewer_role = getattr(current_user, "role", "user") if current_user else "guest"
     status_filter = None
-    if getattr(current_user, "role", "user") != "admin":
+    if viewer_role != "admin":
         status_filter = 1
     else:
         if status != "":
@@ -84,8 +85,8 @@ def list_posts(
         status=status_filter,
         spot_id=spot_id,
         current_user=current_user,
-        viewer_id=current_user.id,
-        include_all_visibility=getattr(current_user, "role", "user") == "admin",
+        viewer_id=getattr(current_user, "id", None),
+        include_all_visibility=viewer_role == "admin",
     )
 
 
@@ -110,6 +111,11 @@ def list_my_posts(
 def get_post(post_id: int, db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     post = post_service.get_post_by_id(db, post_id)
     if not post:
+        raise HTTPException(status_code=404, detail="游记不存在")
+    # 拉黑拦截：作者把我拉黑后，直链也不能看
+    from services import block_service
+
+    if block_service.is_blocked(db, post.user_id, getattr(current_user, "id", None)):
         raise HTTPException(status_code=404, detail="游记不存在")
     status = getattr(post, "status", 0) or 0
     if status != 1:

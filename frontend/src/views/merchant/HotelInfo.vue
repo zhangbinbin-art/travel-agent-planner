@@ -43,6 +43,10 @@
             <el-form-item label="联系电话">
               <el-input v-model="profileForm.phone" maxlength="30" placeholder="酒店前台电话" />
             </el-form-item>
+            <el-form-item label="单日房价">
+              <el-input-number v-model="profileForm.price" :min="0" :step="50" />
+              <span class="hint-inline">审核通过后作为酒店基础房价对外展示</span>
+            </el-form-item>
             <el-form-item label="酒店简介">
               <el-input
                 v-model="profileForm.intro"
@@ -179,6 +183,7 @@ const profileForm = reactive({
   lng: '',
   lat: '',
   phone: '',
+  price: 300,
   intro: '',
   imgs: [],
   tags: [],
@@ -247,6 +252,7 @@ const fillProfileForm = (data) => {
     lng: data.lng ?? '',
     lat: data.lat ?? '',
     phone: data.phone || '',
+    price: Number(data.price ?? 300),
     intro: data.intro || '',
     imgs: data.imgs || [],
     tags: data.tags || [],

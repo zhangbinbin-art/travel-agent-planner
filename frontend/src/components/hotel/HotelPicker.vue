@@ -102,6 +102,8 @@ const markerHotels = computed(() =>
     cover_img: h.cover,
     description: h.description,
     address: h.address,
+    env_score: h.env_score,
+    service_score: h.service_score,
     _fromMarker: true
   }))
 )
@@ -115,6 +117,9 @@ const generatedHotels = computed(() => {
     const price = Number(h.price_per_day) || 0
     if (minP > 0 && price < minP) return false
     if (maxP < 2000 && price > maxP) return false
+    // 配套酒店现在也带评分，最低评分筛选同样生效
+    if (f.minEnv > 0 && Number(h.env_score || 0) < f.minEnv) return false
+    if (f.minService > 0 && Number(h.service_score || 0) < f.minService) return false
     return true
   })
 })

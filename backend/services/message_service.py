@@ -74,6 +74,18 @@ def get_chat(db: Session, me_id: int, target_user_id: int, page: int = 1, page_s
         .all()
     )
     rows.reverse()
+    # 打开会话即把对方发来的消息标记为已读
+    updated = (
+        db.query(Message)
+        .filter(
+            Message.sender_id == target_user_id,
+            Message.receiver_id == me_id,
+            Message.is_read.is_(False),
+        )
+        .update({Message.is_read: True}, synchronize_session=False)
+    )
+    if updated:
+        db.commit()
     allowed, reason = check_can_send(db, me_id, target_user_id)
     return {
         "items": rows,
@@ -120,7 +132,15 @@ def list_conversations(db: Session, me_id: int) -> dict:
         user = users.get(peer_id)
         if not user:
             continue
-        unread = message.sender_id == peer_id and message.status == MESSAGE_WAIT_REPLY
+        unread = bool(
+            db.query(Message.id)
+            .filter(
+                Message.sender_id == peer_id,
+                Message.receiver_id == me_id,
+                Message.is_read.is_(False),
+            )
+            .first()
+        )
         if unread:
             unread_total += 1
         items.append(

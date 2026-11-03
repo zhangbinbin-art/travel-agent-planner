@@ -33,7 +33,7 @@
 </template>
 
 <script setup>
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { auth, clearAuth } from '@/utils/auth'
@@ -68,7 +68,15 @@ const loadStatus = async () => {
   }
 }
 
-onMounted(loadStatus)
+let statusTimer = null
+onMounted(() => {
+  loadStatus()
+  // 管理员审核后无需手动刷新，30s 自动同步顶部提示
+  statusTimer = window.setInterval(loadStatus, 30000)
+})
+onBeforeUnmount(() => {
+  if (statusTimer) window.clearInterval(statusTimer)
+})
 
 const handleLogout = () => {
   clearAuth()

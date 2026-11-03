@@ -116,6 +116,8 @@ def save_profile(db: Session, shop_id: int, data: dict, submit: bool = False) ->
     profile.lng = data.get("lng")
     profile.lat = data.get("lat")
     profile.phone = (data.get("phone") or "").strip() or None
+    if data.get("price") is not None:
+        profile.price = float(data.get("price") or 0)
     profile.intro = data.get("intro") or None
     profile.imgs = _dumps(data.get("imgs") or [])
     profile.tags = _dumps(data.get("tags") or [])
@@ -202,6 +204,20 @@ def sync_hotel(db: Session, shop_id: int) -> Optional[Hotel]:
         db.add(hotel)
         db.flush()
         shop.merchant_hotel_id = hotel.id
+        # 新酒店自动补三种基础房型，审核通过后即可直接接单
+        from models import Room
+
+        base_price = float(profile.price or 300)
+        for room_type, factor, stock in (("标准大床房", 0.8, 10), ("双床房", 1.0, 8), ("家庭套房", 1.4, 5)):
+            db.add(
+                Room(
+                    hotel_id=hotel.id,
+                    room_type=room_type,
+                    room_price=round(base_price * factor, 2),
+                    stock=stock,
+                    status="free",
+                )
+            )
 
     if hotel:
         hotel.merchant_id = shop_id
@@ -213,6 +229,8 @@ def sync_hotel(db: Session, shop_id: int) -> Optional[Hotel]:
             hotel.description = profile.intro
             hotel.facilities = ",".join(_loads(profile.tags))
             hotel.phone = profile.phone
+            if profile.price is not None:
+                hotel.price_per_day = float(profile.price)
             hotel.imgs = profile.imgs
             hotel.checkin_rule = profile.checkin_rule
             imgs = _loads(profile.imgs)

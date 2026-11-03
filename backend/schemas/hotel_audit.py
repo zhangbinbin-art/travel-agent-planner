@@ -11,6 +11,7 @@ class HotelProfileUpsert(BaseModel):
     lng: Optional[float] = None
     lat: Optional[float] = None
     phone: Optional[str] = Field(None, max_length=30)
+    price: Optional[float] = Field(None, ge=0)
     intro: Optional[str] = None
     imgs: List[str] = Field(default_factory=list)
     tags: List[str] = Field(default_factory=list)

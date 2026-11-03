@@ -30,8 +30,30 @@
           <span>环境 {{ hotel.env_score || '-' }} ｜ 服务 {{ hotel.service_score || '-' }}</span>
         </div>
         <div class="info-row">
+          <span class="label">联系电话</span>
+          <span>{{ hotel.phone || '暂无' }}</span>
+        </div>
+        <div class="info-row">
           <span class="label">简介</span>
           <span>{{ hotel.description || '暂无简介' }}</span>
+        </div>
+        <div class="info-row">
+          <span class="label">入住规则</span>
+          <span>{{ hotel.checkin_rule || '入住 14:00 后，退房 12:00 前' }}</span>
+        </div>
+        <div v-if="album.length" class="album">
+          <div class="album-title">酒店相册</div>
+          <div class="album-grid">
+            <el-image
+              v-for="(url, idx) in album"
+              :key="idx"
+              :src="url"
+              :preview-src-list="album"
+              :initial-index="idx"
+              fit="cover"
+              class="album-item"
+            />
+          </div>
         </div>
         <div class="info-row">
           <span class="label">配套设施</span>
@@ -56,6 +78,18 @@ const hotel = ref(null)
 const loading = ref(false)
 
 const facilities = computed(() => parseFacilities(hotel.value))
+
+// 商家提交并审核通过的相册（hotels.imgs 存 JSON 数组字符串）
+const album = computed(() => {
+  const raw = hotel.value?.imgs
+  if (!raw) return []
+  try {
+    const list = JSON.parse(raw)
+    return Array.isArray(list) ? list.filter(Boolean) : []
+  } catch (e) {
+    return []
+  }
+})
 
 const formatMoney = (val) => {
   const num = Number(val)
@@ -87,6 +121,28 @@ onMounted(fetchHotel)
 </script>
 
 <style scoped>
+.album {
+  margin-top: 16px;
+}
+.album-title {
+  font-size: 14px;
+  font-weight: 700;
+  color: #222;
+  margin-bottom: 8px;
+}
+.album-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(120px, 1fr));
+  gap: 10px;
+}
+.album-item {
+  width: 100%;
+  height: 96px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid rgba(34, 34, 34, 0.12);
+}
+
 .hotel-detail-page {
   max-width: 900px;
   margin: 0 auto;

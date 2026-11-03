@@ -704,8 +704,19 @@ def _order_day(group, start_spot):
 
 def recommend_hotels(db: Session, payload) -> list:
     query = db.query(Hotel).filter(Hotel.status == "on_shelf")
-    # 单目的地：只取目标城市酒店（地址包含城市名）
-    query = query.filter(Hotel.address.contains(payload.target_city))
+    # 单目的地：优先按地址包含城市名匹配；匹配不到时按坐标距离兜底（≤100km）
+    city_hotels = query.filter(Hotel.address.contains(payload.target_city)).all()
+    if city_hotels:
+        hotels = city_hotels
+    else:
+        center = _CITY_COORDS.get((payload.target_city or "").strip())
+        hotels = []
+        if center:
+            for h in query.all():
+                if h.lat is None or h.lng is None:
+                    continue
+                if _haversine_km(center[0], center[1], float(h.lat), float(h.lng)) <= 100:
+                    hotels.append(h)
     if payload.min_price is not None:
         query = query.filter(Hotel.price_per_day >= payload.min_price)
     if payload.max_price is not None:
@@ -714,7 +725,15 @@ def recommend_hotels(db: Session, payload) -> list:
         query = query.filter(Hotel.env_score >= payload.min_env_score)
     if payload.min_service_score is not None:
         query = query.filter(Hotel.service_score >= payload.min_service_score)
-    hotels = query.all()
+    # 注意：上面已在地址匹配阶段取过 hotels，这里只对 fallback 结果做二次过滤
+    hotels = [
+        h
+        for h in hotels
+        if (payload.min_price is None or (h.price_per_day or 0) >= payload.min_price)
+        and (payload.max_price is None or (h.price_per_day or 0) <= payload.max_price)
+        and (payload.min_env_score is None or (h.env_score or 0) >= payload.min_env_score)
+        and (payload.min_service_score is None or (h.service_score or 0) >= payload.min_service_score)
+    ]
 
     if payload.hotel_types:
         hotels = [h for h in hotels if _hotel_type(h.name) in payload.hotel_types]
@@ -932,6 +951,8 @@ def smart_recommend(db: Session, payload) -> dict:
                 "lng": float(lng),
                 "lat": float(lat),
                 "price": float(hotel.get("price_per_day") or 0),
+                "env_score": hotel.get("env_score") or 0,
+                "service_score": hotel.get("service_score") or 0,
                 "cover": hotel.get("cover_img"),
                 "description": hotel.get("description"),
                 "address": hotel.get("address"),

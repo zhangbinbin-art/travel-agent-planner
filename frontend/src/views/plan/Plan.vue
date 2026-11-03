@@ -295,7 +295,8 @@ defineOptions({ name: 'Plan' })
 
 const router = useRouter()
 
-const PLAN_CACHE_KEY = 'last_trip_plan'
+// 缓存按登录用户隔离，避免同一标签页切换账号后串到别人的行程
+const planCacheKey = () => `last_trip_plan_${auth.userId || 'guest'}`
 
 // 按需注册 ECharts 模块（「路线示意图」Tab 使用）
 echarts.use([GraphChart, GridComponent, TooltipComponent, CanvasRenderer])
@@ -636,7 +637,7 @@ const savePlanCache = () => {
       guestCount: guestCount.value,
       remark: remark.value
     }
-    sessionStorage.setItem(PLAN_CACHE_KEY, JSON.stringify(payload))
+    sessionStorage.setItem(planCacheKey(), JSON.stringify(payload))
   } catch (e) {
     console.warn('[Plan] 保存会话缓存失败:', e?.message)
   }
@@ -644,7 +645,7 @@ const savePlanCache = () => {
 
 const restorePlanCache = () => {
   try {
-    const raw = sessionStorage.getItem(PLAN_CACHE_KEY)
+    const raw = sessionStorage.getItem(planCacheKey())
     if (!raw) return false
     const data = JSON.parse(raw)
     startLocation.value = data.startLocation || ''
@@ -679,7 +680,7 @@ const restorePlanCache = () => {
 
 const clearPlanCache = () => {
   try {
-    sessionStorage.removeItem(PLAN_CACHE_KEY)
+    sessionStorage.removeItem(planCacheKey())
   } catch (e) {
     // ignore
   }

@@ -1,6 +1,6 @@
 """商家酒店资料 / 资质认证（与客户端 hotels 表分离，审核通过后才同步对外展示）。"""
 
-from sqlalchemy import Column, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Column, DateTime, Float, ForeignKey, Integer, String, Text
 from sqlalchemy.sql import func
 
 from core.database import Base
@@ -24,6 +24,8 @@ class HotelProfile(Base):
     lng = Column(String(30), nullable=True)
     lat = Column(String(30), nullable=True)
     phone = Column(String(30), nullable=True)
+    # 酒店基础房价（元/天），审核通过后同步到 hotels.price_per_day
+    price = Column(Float, default=300)
     intro = Column(Text, nullable=True)
     # 相册图片 JSON 数组
     imgs = Column(Text, nullable=True)
