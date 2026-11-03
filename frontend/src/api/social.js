@@ -33,3 +33,8 @@ export function getUserProfile(userId) {
 export function toggleBlock(targetUserId) {
   return api.post(`/api/v1/user/block/${targetUserId}`)
 }
+
+// 私聊会话列表（导航栏消息入口）
+export function getConversations() {
+  return api.get('/api/v1/user/message/conversations')
+}

@@ -33,6 +33,16 @@
             @clear="searchKeyword = ''"
           />
           <el-button type="primary" class="tr-search-btn" @click="handleSearch">搜索</el-button>
+          <el-button
+            v-if="auth.token"
+            circle
+            class="tr-msg-btn"
+            aria-label="聊天消息"
+            @click="messagesVisible = true"
+          >
+            <el-icon><ChatDotRound /></el-icon>
+            <i v-if="unreadCount > 0" class="tr-msg-dot"></i>
+          </el-button>
         </div>
 
         <el-dropdown v-if="auth.role === 'admin'" trigger="click" @command="go">
@@ -63,19 +73,26 @@
         </template>
       </div>
     </div>
+
+    <ConversationList v-model="messagesVisible" />
   </header>
 </template>
 
 <script setup>
-import { computed, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowDown, UserFilled } from '@element-plus/icons-vue'
+import { ArrowDown, ChatDotRound, UserFilled } from '@element-plus/icons-vue'
 import { auth, clearAuth } from '@/utils/auth'
+import { getConversations } from '@/api/social'
+import ConversationList from '@/components/message/ConversationList.vue'
 
 const router = useRouter()
 const route = useRoute()
 const searchKeyword = ref('')
+const messagesVisible = ref(false)
+const unreadCount = ref(0)
+let unreadTimer = null
 
 const navItems = [
   { key: 'home', label: '首页', path: '/' },
@@ -111,8 +128,41 @@ const handleSearch = () => {
 const handleLogout = () => {
   clearAuth()
   ElMessage.success('已退出登录')
+  unreadCount.value = 0
   router.push('/')
 }
+
+// 未读会话轮询（导航栏小红点）：登录状态下每 30s 刷新一次
+const refreshUnread = async () => {
+  if (!auth.token) {
+    unreadCount.value = 0
+    return
+  }
+  try {
+    const res = await getConversations()
+    unreadCount.value = Number(res.data?.unread_total) || 0
+  } catch (e) {
+    unreadCount.value = 0
+  }
+}
+
+onMounted(() => {
+  refreshUnread()
+  unreadTimer = window.setInterval(refreshUnread, 30000)
+})
+
+onBeforeUnmount(() => {
+  if (unreadTimer) window.clearInterval(unreadTimer)
+})
+
+watch(
+  () => auth.token,
+  () => refreshUnread()
+)
+
+watch(messagesVisible, (val) => {
+  if (!val) refreshUnread()
+})
 </script>
 
 <style scoped>
@@ -248,6 +298,29 @@ const handleLogout = () => {
 
 .tr-logout-btn {
   height: 34px;
+}
+
+.tr-msg-btn {
+  position: relative;
+  width: 34px;
+  height: 34px;
+  padding: 0;
+}
+
+.tr-msg-btn:hover {
+  background: #fff1e6;
+  color: #f06818;
+}
+
+.tr-msg-dot {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #f56c6c;
+  border: 2px solid #fff;
 }
 
 @media (max-width: 1100px) {

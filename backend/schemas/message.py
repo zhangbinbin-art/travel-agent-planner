@@ -31,3 +31,22 @@ class ChatResponse(BaseModel):
     can_send: bool = True
     block_reason: Optional[str] = None
     target_user: Optional[FollowUserOut] = None
+
+
+class ConversationLastMessage(BaseModel):
+    content: str = ""
+    create_time: Optional[datetime] = None
+    from_me: bool = False
+
+
+class ConversationItem(BaseModel):
+    user: Optional[FollowUserOut] = None
+    last_message: Optional[ConversationLastMessage] = None
+    unread: bool = False
+    blocked: bool = False
+
+
+class ConversationListResponse(BaseModel):
+    items: List[ConversationItem] = []
+    total: int = 0
+    unread_total: int = 0

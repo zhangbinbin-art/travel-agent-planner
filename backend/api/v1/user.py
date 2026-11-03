@@ -7,7 +7,7 @@ from api.deps import get_current_user, get_optional_user
 from models import User
 from schemas.user import UserRegister, UserLogin, UserOut, Token, RealNameRequest
 from schemas.follow import FollowRequest, FollowListResponse, UserPostsResponse
-from schemas.message import MessageSendRequest, MessageSchema, ChatResponse
+from schemas.message import ChatResponse, ConversationListResponse, MessageSchema, MessageSendRequest
 from services import block_service, follow_service, message_service, post_service
 import re
 
@@ -202,6 +202,15 @@ def list_user_posts(
 
 
 # ---------- 私聊 ----------
+
+@router.get("/message/conversations", response_model=ConversationListResponse)
+def list_chat_conversations(
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """当前登录用户的私聊会话列表（导航栏消息入口使用）。"""
+    return message_service.list_conversations(db, current_user.id)
+
 
 @router.post("/message/send", response_model=MessageSchema)
 def send_chat_message(

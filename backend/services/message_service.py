@@ -81,3 +81,64 @@ def get_chat(db: Session, me_id: int, target_user_id: int, page: int = 1, page_s
         "can_send": allowed,
         "block_reason": reason,
     }
+
+
+def list_conversations(db: Session, me_id: int) -> dict:
+    """当前用户的私聊会话列表（按最新消息倒序）。
+
+    未读口径：最新一条是对方发来的 wait_reply 消息（等我回复）即视为未读。
+    blocked：双方任一拉黑即不可进入对话。
+    """
+    from models import User
+    from services.block_service import is_blocked_either
+
+    rows = (
+        db.query(Message)
+        .filter(or_(Message.sender_id == me_id, Message.receiver_id == me_id))
+        .order_by(Message.id.desc())
+        .all()
+    )
+
+    latest_by_peer = {}
+    for message in rows:
+        peer_id = message.receiver_id if message.sender_id == me_id else message.sender_id
+        if peer_id in latest_by_peer:
+            continue
+        latest_by_peer[peer_id] = message
+
+    if not latest_by_peer:
+        return {"items": [], "total": 0, "unread_total": 0}
+
+    users = {
+        u.id: u
+        for u in db.query(User).filter(User.id.in_(list(latest_by_peer.keys()))).all()
+    }
+
+    items = []
+    unread_total = 0
+    for peer_id, message in latest_by_peer.items():
+        user = users.get(peer_id)
+        if not user:
+            continue
+        unread = message.sender_id == peer_id and message.status == MESSAGE_WAIT_REPLY
+        if unread:
+            unread_total += 1
+        items.append(
+            {
+                "user": {
+                    "id": user.id,
+                    "username": user.username,
+                    "role": getattr(user, "role", "user") or "user",
+                    "avatar": None,
+                },
+                "last_message": {
+                    "content": message.content,
+                    "create_time": message.create_time,
+                    "from_me": message.sender_id == me_id,
+                },
+                "unread": unread,
+                "blocked": is_blocked_either(db, me_id, peer_id),
+            }
+        )
+
+    return {"items": items, "total": len(items), "unread_total": unread_total}
