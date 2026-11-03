@@ -96,7 +96,13 @@
           </div>
 
           <div class="author-card">
-            <div class="author-avatar" :style="{ backgroundColor: avatarColor }">{{ avatarText }}</div>
+            <div
+              class="author-avatar"
+              :style="{ backgroundColor: avatarColor }"
+              :title="canVisitAuthor ? '查看作者主页' : ''"
+              :class="{ 'is-clickable': canVisitAuthor }"
+              @click="goAuthorProfile"
+            >{{ avatarText }}</div>
             <div class="author-main">
               <span class="author-name">{{ authorName }}</span>
               <span class="author-sub">
@@ -420,6 +426,15 @@ const canManage = computed(
 )
 
 const authorName = computed(() => post.value?.author?.username || '匿名')
+// 作者主页跳转：作者 id 存在且不是自己时才可点击
+const authorId = computed(() => post.value?.author?.id || post.value?.user_id || null)
+const canVisitAuthor = computed(() => !!authorId.value)
+
+const goAuthorProfile = () => {
+  if (!authorId.value) return
+  router.push(`/user/${authorId.value}`)
+}
+
 const formattedTime = computed(() => formatTime(post.value?.created_at))
 
 const imageList = computed(() => {
@@ -689,7 +704,7 @@ onMounted(() => {
   padding: 20px;
   min-height: calc(100vh - 60px);
   box-sizing: border-box;
-  background: #f5f8fa;
+  background: transparent;
 }
 .detail-inner {
   max-width: 560px;
@@ -775,6 +790,14 @@ onMounted(() => {
   font-weight: 600;
   line-height: 1;
   user-select: none;
+}
+.author-avatar.is-clickable {
+  cursor: pointer;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+.author-avatar.is-clickable:hover {
+  transform: scale(1.08);
+  box-shadow: 0 4px 12px rgba(34, 34, 34, 0.22);
 }
 .author-main {
   display: flex;

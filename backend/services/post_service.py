@@ -3,6 +3,7 @@ from datetime import datetime
 from sqlalchemy import or_
 from sqlalchemy.orm import Session
 from models import Post, Spot, PostLike, Comment, CommentLike, User, PostFavorite
+from services.block_service import blocked_author_ids
 from typing import Optional
 
 
@@ -196,6 +197,11 @@ def get_posts(
         query = query.filter(or_(*visible_conditions))
     if status is not None:
         query = query.filter(Post.status == status)
+    # 拉黑联动：「把我拉黑的人」发布的帖子对我不展示
+    if viewer_id is not None:
+        hidden_author_ids = blocked_author_ids(db, viewer_id)
+        if hidden_author_ids:
+            query = query.filter(~Post.user_id.in_(hidden_author_ids))
     if keyword:
         keyword = keyword.strip()
         if keyword:

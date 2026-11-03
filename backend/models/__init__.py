@@ -224,3 +224,4 @@ class Bill(Base):
 # 社交模块单独成文件，在此导入以保证 Base.metadata 能收集到这两张表
 from models.follow import Follow  # noqa: E402,F401
 from models.message import Message  # noqa: E402,F401
+from models.block import UserBlock  # noqa: E402,F401

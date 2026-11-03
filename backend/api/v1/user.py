@@ -8,7 +8,7 @@ from models import User
 from schemas.user import UserRegister, UserLogin, UserOut, Token, RealNameRequest
 from schemas.follow import FollowRequest, FollowListResponse, UserPostsResponse
 from schemas.message import MessageSendRequest, MessageSchema, ChatResponse
-from services import follow_service, message_service, post_service
+from services import block_service, follow_service, message_service, post_service
 import re
 
 router = APIRouter()
@@ -83,6 +83,59 @@ def submit_real_name(
     return current_user
 
 
+# ---------- 用户主页 / 拉黑 ----------
+
+@router.get("/{user_id}/profile")
+def get_user_profile(
+    user_id: int,
+    db: Session = Depends(get_db),
+    viewer: User = Depends(get_optional_user),
+):
+    """他人主页信息：资料、帖子数、粉丝/关注数、关注与拉黑状态。
+
+    被对方拉黑时直接 403，前端展示「你已被该用户拉黑，无法访问主页」。
+    """
+    target = db.query(User).filter(User.id == user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+
+    viewer_id = getattr(viewer, "id", None)
+    viewer_is_self = bool(viewer_id is not None and int(viewer_id) == int(user_id))
+    blocked_by_target = block_service.is_blocked(db, user_id, viewer_id)
+    if blocked_by_target and not viewer_is_self:
+        raise HTTPException(status_code=403, detail="你已被该用户拉黑，无法访问主页")
+
+    posts = post_service.get_author_posts(db, user_id, viewer=viewer, page=1, page_size=1)
+    brief = follow_service.build_user_brief(target) or {}
+    return {
+        "user": brief,
+        # 数据库暂无简介字段，前端展示默认文案
+        "bio": None,
+        "post_count": posts.get("total", 0),
+        "following_count": follow_service.count_following(db, user_id),
+        "follower_count": follow_service.count_fans(db, user_id),
+        "is_following": follow_service.is_following(db, viewer_id, user_id),
+        "viewer_is_self": viewer_is_self,
+        "i_blocked": block_service.is_blocked(db, viewer_id, user_id),
+        "blocked_by_target": blocked_by_target,
+    }
+
+
+@router.post("/block/{target_user_id}")
+def toggle_user_block(
+    target_user_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """拉黑 / 解除拉黑指定用户（幂等切换）。"""
+    if int(target_user_id) == int(current_user.id):
+        raise HTTPException(status_code=400, detail="不能拉黑自己")
+    target = db.query(User).filter(User.id == target_user_id).first()
+    if not target:
+        raise HTTPException(status_code=404, detail="用户不存在")
+    return block_service.toggle_block(db, current_user.id, target_user_id)
+
+
 # ---------- 关注 / 粉丝 ----------
 
 @router.post("/follow")
@@ -134,6 +187,9 @@ def list_user_posts(
     target = db.query(User).filter(User.id == target_user_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
+    # 拉黑拦截：被对方拉黑时看不到其帖子
+    if block_service.is_blocked(db, target_user_id, getattr(viewer, "id", None)):
+        raise HTTPException(status_code=403, detail="你已被该用户拉黑，无法查看其内容")
     data = post_service.get_author_posts(
         db, target_user_id, viewer=viewer, page=page, page_size=page_size
     )
@@ -159,6 +215,8 @@ def send_chat_message(
     target = db.query(User).filter(User.id == payload.receiver_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
+    if block_service.is_blocked_either(db, current_user.id, payload.receiver_id):
+        raise HTTPException(status_code=403, detail="无法发起私聊")
     content = (payload.content or "").strip()
     if not content:
         raise HTTPException(status_code=400, detail="消息内容不能为空")
@@ -180,6 +238,8 @@ def get_chat_history(
     target = db.query(User).filter(User.id == target_user_id).first()
     if not target:
         raise HTTPException(status_code=404, detail="用户不存在")
+    if block_service.is_blocked_either(db, current_user.id, target_user_id):
+        raise HTTPException(status_code=403, detail="无法发起私聊")
     data = message_service.get_chat(db, current_user.id, target_user_id, page=page, page_size=page_size)
     data["target_user"] = follow_service.build_user_brief(target)
     return data

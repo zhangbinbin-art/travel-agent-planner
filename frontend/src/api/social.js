@@ -23,3 +23,13 @@ export function sendMessage(data) {
 export function getChat(targetUserId, params) {
   return api.get(`/api/v1/user/message/chat/${targetUserId}`, { params })
 }
+
+// 用户主页信息（资料/帖子数/粉丝关注数/关注与拉黑状态）
+export function getUserProfile(userId) {
+  return api.get(`/api/v1/user/${userId}/profile`)
+}
+
+// 拉黑 / 解除拉黑（幂等切换）
+export function toggleBlock(targetUserId) {
+  return api.post(`/api/v1/user/block/${targetUserId}`)
+}
