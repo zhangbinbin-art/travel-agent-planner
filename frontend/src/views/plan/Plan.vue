@@ -302,7 +302,7 @@ const planCacheKey = () => `last_trip_plan_${auth.userId || 'guest'}`
 echarts.use([GraphChart, GridComponent, TooltipComponent, CanvasRenderer])
 
 const travelTypes = ['单人出行', '情侣出行', '家庭亲子', '老年休闲']
-const prefOptions = ['自然风光', '人文古迹', '美食探店', '游乐乐园', '城市逛街', '徒步登山']
+const prefOptions = ['自然风光', '人文古迹', '美食探店', '游乐乐园', '城市逛街', '徒步登山', '海滨海岛', '亲子出游']
 
 const startLocation = ref('')
 const startLat = ref('')
