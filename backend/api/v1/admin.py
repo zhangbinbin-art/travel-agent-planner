@@ -22,6 +22,8 @@ from pydantic import BaseModel
 from typing import Optional
 from services import post_service, comment_service
 from services.hotel_service import build_booking_out
+from services import hotel_audit_service
+from schemas.hotel_audit import AuditRejectRequest
 
 router = APIRouter()
 
@@ -337,3 +339,46 @@ def admin_room_list(
         ],
         "total": len(rows),
     }
+
+
+# ---------------------------------------------------------------------------
+# 酒店资料 / 资质审核（v0.16）
+# ---------------------------------------------------------------------------
+
+@router.get("/hotel-audits")
+def admin_hotel_audits(
+    status: str = Query("pending"),
+    keyword: str = Query(""),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """待审核 / 已通过 / 已驳回 列表；status 传 all 时返回全部。"""
+    st = None if status in ("", "all") else status
+    return {"items": hotel_audit_service.audit_items(db, status=st, keyword=keyword)}
+
+
+@router.post("/hotel-audits/{kind}/{item_id}/approve")
+def admin_approve_hotel_audit(
+    kind: str,
+    item_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    try:
+        return hotel_audit_service.approve(db, kind, item_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.post("/hotel-audits/{kind}/{item_id}/reject")
+def admin_reject_hotel_audit(
+    kind: str,
+    item_id: int,
+    payload: AuditRejectRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    try:
+        return hotel_audit_service.reject(db, kind, item_id, payload.reason)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))

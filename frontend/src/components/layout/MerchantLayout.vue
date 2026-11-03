@@ -10,11 +10,15 @@
         <el-button text type="danger" @click="handleLogout">退出登录</el-button>
       </div>
     </header>
+    <div v-if="!verified && bannerText" class="verify-banner" :class="{ 'is-error': hasRejected }">
+      {{ bannerText }}
+    </div>
     <div class="merchant-body">
       <aside class="merchant-sidebar">
         <el-menu :default-active="$route.path" router>
           <el-menu-item index="/merchant/dashboard">仪表盘</el-menu-item>
-          <el-menu-item index="/merchant/rooms">客房管理</el-menu-item>
+          <el-menu-item index="/merchant/hotel-info">酒店详情</el-menu-item>
+          <el-menu-item index="/merchant/rooms" :disabled="!verified">客房管理</el-menu-item>
           <el-menu-item index="/merchant/orders">预定订单</el-menu-item>
           <el-menu-item index="/merchant/guests">客人登记</el-menu-item>
           <el-menu-item index="/merchant/bills">账单收银</el-menu-item>
@@ -29,11 +33,42 @@
 </template>
 
 <script setup>
+import { computed, onMounted, ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { auth, clearAuth } from '@/utils/auth'
+import { getHotelStatus } from '@/api/hotel'
 
 const router = useRouter()
+const hotelStatus = ref({ verified: false, profile_status: null, cert_status: null, profile_msg: '', cert_msg: '' })
+
+const verified = computed(() => !!hotelStatus.value.verified)
+const hasRejected = computed(
+  () => hotelStatus.value.profile_status === 'rejected' || hotelStatus.value.cert_status === 'rejected'
+)
+// 动态顶部提示：未提交 / 待审核 / 驳回 / 全部通过（通过后不显示）
+const bannerText = computed(() => {
+  const p = hotelStatus.value.profile_status
+  const c = hotelStatus.value.cert_status
+  if (!p && !c) return '请前往酒店详情页完善酒店资料并提交审核'
+  if (p === 'rejected') return `审核已驳回：${hotelStatus.value.profile_msg || '酒店资料不符合要求'}，请修改后重新提交`
+  if (c === 'rejected') return `审核已驳回：${hotelStatus.value.cert_msg || '酒店资质不符合要求'}，请修改后重新提交`
+  if (p === 'pending' && (!c || c === 'draft')) return '酒店资料待审核，请补充酒店资质认证'
+  if (c === 'pending' && (!p || p === 'draft')) return '酒店资质待审核，请补充酒店资料'
+  return '酒店资料与资质认证审核通过后才会在客户端展示'
+})
+
+const loadStatus = async () => {
+  if (!auth.token) return
+  try {
+    const res = await getHotelStatus()
+    hotelStatus.value = res.data || hotelStatus.value
+  } catch (e) {
+    hotelStatus.value = { verified: false, profile_status: null, cert_status: null, profile_msg: '', cert_msg: '' }
+  }
+}
+
+onMounted(loadStatus)
 
 const handleLogout = () => {
   clearAuth()
@@ -94,6 +129,22 @@ const handleLogout = () => {
 .welcome {
   color: #5a6472;
   font-size: 14px;
+}
+.verify-banner {
+  max-width: 1100px;
+  margin: 12px 20px 0;
+  padding: 10px 16px;
+  border: 2px solid #f0c37a;
+  border-radius: 10px;
+  background: #fff8ea;
+  color: #a1650c;
+  font-size: 13px;
+  font-weight: 600;
+}
+.verify-banner.is-error {
+  border-color: #f3a7a7;
+  background: #fff1f1;
+  color: #c0392b;
 }
 .merchant-body {
   display: flex;

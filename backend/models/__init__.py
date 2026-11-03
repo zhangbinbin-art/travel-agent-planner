@@ -141,6 +141,10 @@ class Hotel(Base):
     facilities = Column(Text)          # 配套设施，逗号分隔
     env_score = Column(Float, default=0)      # 环境评分
     service_score = Column(Float, default=0)  # 服务评分
+    # v0.16 商家提交并审核通过后同步的资料字段
+    phone = Column(String(30), nullable=True)
+    imgs = Column(Text, nullable=True)                 # 相册 JSON 数组
+    checkin_rule = Column(String(255), nullable=True)
     status = Column(String(20), default="on_shelf")  # on_shelf / off_shelf
     create_time = Column(DateTime(timezone=True), server_default=func.now())
     update_time = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
@@ -227,3 +231,4 @@ class Bill(Base):
 from models.follow import Follow  # noqa: E402,F401
 from models.message import Message  # noqa: E402,F401
 from models.block import UserBlock  # noqa: E402,F401
+from models.hotel_audit import HotelCertification, HotelProfile  # noqa: E402,F401

@@ -39,6 +39,7 @@ const routes = [
     component: () => import('@/components/layout/MerchantLayout.vue'),
     children: [
       { path: '', redirect: '/merchant/dashboard' },
+      { path: 'hotel-info', name: 'MerchantHotelInfo', component: () => import('@/views/merchant/HotelInfo.vue') },
       { path: 'dashboard', name: 'MerchantDashboard', component: () => import('@/views/merchant/MerchantDashboard.vue') },
       { path: 'rooms', name: 'MerchantRooms', component: () => import('@/views/merchant/MerchantRooms.vue') },
       { path: 'orders', name: 'MerchantOrders', component: () => import('@/views/merchant/MerchantOrders.vue') },

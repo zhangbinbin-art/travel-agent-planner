@@ -5,7 +5,9 @@ from sqlalchemy.orm import Session
 
 from api.deps import require_merchant, require_merchant_hotel
 from core.database import get_db
+from services import hotel_audit_service
 from models import Bill, GuestRecord, Hotel, HotelOrder, Room, User
+from schemas.hotel_audit import HotelCertUpsert, HotelProfileUpsert
 from schemas.hotel import (
     BillOut,
     DashboardOut,
@@ -69,12 +71,24 @@ def list_rooms(db: Session = Depends(get_db), hotel_id: int = Depends(require_me
     return db.query(Room).filter(Room.hotel_id == hotel_id).order_by(Room.id.desc()).all()
 
 
+def _require_verified(db: Session, shop: User) -> None:
+    status = hotel_audit_service.merchant_status(db, shop.id, shop)
+    if not status["verified"]:
+        raise HTTPException(
+            status_code=403,
+            detail="酒店资料与资质认证审核通过后才能新增客房",
+        )
+
+
 @router.post("/room", response_model=RoomOut)
 def create_room(
     payload: RoomCreate,
     db: Session = Depends(get_db),
     hotel_id: int = Depends(require_merchant_hotel),
+    shop: User = Depends(require_merchant),
 ):
+    # 酒店资料 + 资质认证双通过后才允许新增客房
+    _require_verified(db, shop)
     room = Room(hotel_id=hotel_id, **payload.model_dump())
     db.add(room)
     db.commit()
@@ -385,3 +399,74 @@ def dashboard(db: Session = Depends(get_db), hotel_id: int = Depends(require_mer
         reject_count=sum(1 for o in orders if o.order_status == "cancelled"),
         booking_total=len(orders),
     )
+
+
+# ---------------------------------------------------------------------------
+# 酒店资料 / 资质认证（v0.16）
+# ---------------------------------------------------------------------------
+
+@router.get("/hotel-status")
+def my_hotel_status(db: Session = Depends(get_db), shop: User = Depends(require_merchant)):
+    """商家顶部提示与客房开关依据。"""
+    return hotel_audit_service.merchant_status(db, shop.id, shop)
+
+
+@router.get("/hotel-profile")
+def get_my_hotel_profile(db: Session = Depends(get_db), shop: User = Depends(require_merchant)):
+    profile = hotel_audit_service.get_profile(db, shop.id)
+    return {
+        "profile": hotel_audit_service.serialize_profile(profile),
+        "status": hotel_audit_service.merchant_status(db, shop.id, shop),
+    }
+
+
+@router.put("/hotel-profile")
+def save_my_hotel_profile(
+    payload: HotelProfileUpsert,
+    submit: bool = Query(False),
+    db: Session = Depends(get_db),
+    shop: User = Depends(require_merchant),
+):
+    try:
+        profile = hotel_audit_service.save_profile(db, shop.id, payload.model_dump(), submit=submit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"profile": hotel_audit_service.serialize_profile(profile)}
+
+
+@router.post("/hotel-profile/reopen")
+def reopen_my_hotel_profile(db: Session = Depends(get_db), shop: User = Depends(require_merchant)):
+    try:
+        hotel_audit_service.reopen(db, shop.id, hotel_audit_service.KIND_PROFILE)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}
+
+
+@router.get("/hotel-cert")
+def get_my_hotel_cert(db: Session = Depends(get_db), shop: User = Depends(require_merchant)):
+    cert = hotel_audit_service.get_cert(db, shop.id)
+    return {"cert": hotel_audit_service.serialize_cert(cert)}
+
+
+@router.put("/hotel-cert")
+def save_my_hotel_cert(
+    payload: HotelCertUpsert,
+    submit: bool = Query(False),
+    db: Session = Depends(get_db),
+    shop: User = Depends(require_merchant),
+):
+    try:
+        cert = hotel_audit_service.save_cert(db, shop.id, payload.model_dump(), submit=submit)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"cert": hotel_audit_service.serialize_cert(cert)}
+
+
+@router.post("/hotel-cert/reopen")
+def reopen_my_hotel_cert(db: Session = Depends(get_db), shop: User = Depends(require_merchant)):
+    try:
+        hotel_audit_service.reopen(db, shop.id, hotel_audit_service.KIND_CERT)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    return {"ok": True}

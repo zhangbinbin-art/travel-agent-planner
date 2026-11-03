@@ -55,6 +55,9 @@ class HotelOut(BaseModel):
     facilities: Optional[str] = None
     env_score: Optional[float] = 0
     service_score: Optional[float] = 0
+    phone: Optional[str] = None
+    imgs: Optional[str] = None
+    checkin_rule: Optional[str] = None
     status: str = "on_shelf"
     create_time: Optional[datetime] = None
     update_time: Optional[datetime] = None

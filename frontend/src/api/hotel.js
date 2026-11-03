@@ -62,3 +62,21 @@ export const adminDeleteHotel = (id) => api.delete(`/api/v1/admin/hotel/${id}`)
 export const getAdminOrders = () => api.get('/api/v1/admin/order')
 export const bindMerchantHotel = (uid, hotelId) =>
   api.put(`/api/v1/admin/merchant/${uid}/bind`, { hotel_id: hotelId })
+
+// ===== v0.16 酒店资料 / 资质认证 =====
+export const getHotelStatus = () => api.get('/api/v1/merchant/hotel-status')
+export const getHotelProfile = () => api.get('/api/v1/merchant/hotel-profile')
+export const saveHotelProfile = (data, submit = false) =>
+  api.put('/api/v1/merchant/hotel-profile', data, { params: { submit } })
+export const reopenHotelProfile = () => api.post('/api/v1/merchant/hotel-profile/reopen')
+export const getHotelCert = () => api.get('/api/v1/merchant/hotel-cert')
+export const saveHotelCert = (data, submit = false) =>
+  api.put('/api/v1/merchant/hotel-cert', data, { params: { submit } })
+export const reopenHotelCert = () => api.post('/api/v1/merchant/hotel-cert/reopen')
+
+// 管理员审核
+export const getHotelAudits = (params) => api.get('/api/v1/admin/hotel-audits', { params })
+export const approveHotelAudit = (kind, id) =>
+  api.post(`/api/v1/admin/hotel-audits/${kind}/${id}/approve`)
+export const rejectHotelAudit = (kind, id, reason) =>
+  api.post(`/api/v1/admin/hotel-audits/${kind}/${id}/reject`, { reason })
