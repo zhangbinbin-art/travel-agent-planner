@@ -77,7 +77,8 @@ class Comment(Base):
     post_id = Column(Integer, ForeignKey("posts.id"), nullable=True)
     content = Column(Text)
     sentiment = Column(String(20))  # positive/neutral/negative
-    score = Column(Integer, default=5)
+    # 景点点评评分支持一位小数（3.5~5.0）
+    score = Column(Float, default=5)
     like_count = Column(Integer, default=0)
     status = Column(Integer, default=0)
     created_at = Column(DateTime(timezone=True), server_default=func.now())

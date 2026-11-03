@@ -6,7 +6,7 @@ from schemas.common import UserBrief
 
 class CommentCreate(BaseModel):
     content: str = Field(..., min_length=1, max_length=1000)
-    score: int = Field(5, ge=1, le=5)
+    score: float = Field(5, ge=1, le=5)
 
 
 class CommentOut(BaseModel):
@@ -14,7 +14,7 @@ class CommentOut(BaseModel):
     post_id: Optional[int] = None
     user_id: int
     content: str
-    score: int = 5
+    score: float = 5
     like_count: int = 0
     liked: bool = False
     status: int = 0
