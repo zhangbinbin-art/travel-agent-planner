@@ -45,3 +45,7 @@ Thumbs.db
 .opencode-data/
 backend/static/
 .omo/
+
+# 演示用静态数据（本地保留，不入库；可用 scripts/import_spots_xlsx.py 重新生成）
+/全国旅游景点数据.xlsx
+/*.xlsx
