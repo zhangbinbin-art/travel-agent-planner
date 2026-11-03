@@ -4,7 +4,7 @@
       <template #header>
         <div class="card-header">
           <span class="card-title">客人登记</span>
-          <el-button type="primary" @click="dialogVisible = true">入住登记</el-button>
+          <el-button type="primary" @click="openDialog">入住登记</el-button>
         </div>
       </template>
       <el-table :data="guests" v-loading="loading" style="width: 100%">
@@ -21,7 +21,24 @@
     <el-dialog v-model="dialogVisible" title="入住登记" width="480px">
       <el-form label-width="90px">
         <el-form-item label="订单号">
-          <el-input-number v-model="form.order_id" :min="1" style="width: 100%" />
+          <el-select
+            v-model="form.order_id"
+            filterable
+            clearable
+            placeholder="选择已支付/入住中的订单"
+            style="width: 100%"
+            :loading="ordersLoading"
+          >
+            <el-option
+              v-for="o in orderOptions"
+              :key="o.id"
+              :value="o.id"
+              :label="`#${o.id} ${o.room_type || ''} ${o.username || ''} ${o.check_in}~${o.check_out}`"
+            />
+          </el-select>
+          <div v-if="!ordersLoading && !orderOptions.length" class="empty-tip">
+            暂无可登记的订单（需先有已支付订单）
+          </div>
         </el-form-item>
         <el-form-item label="姓名">
           <el-input v-model="form.real_name" placeholder="留空则使用订单实名信息" />
@@ -41,13 +58,34 @@
 <script setup>
 import { reactive, ref, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
-import { getGuests, checkinGuest } from '@/api/hotel'
+import { checkinGuest, getGuests, getMerchantOrders } from '@/api/hotel'
 
 const guests = ref([])
 const loading = ref(false)
 const dialogVisible = ref(false)
 const submitting = ref(false)
 const form = reactive({ order_id: null, real_name: '', id_card: '' })
+const orderOptions = ref([])
+const ordersLoading = ref(false)
+
+// 只列出可办理入住的订单（已支付/入住中），并排除已登记过的订单
+const openDialog = async () => {
+  dialogVisible.value = true
+  ordersLoading.value = true
+  try {
+    const [orderRes, guestRes] = await Promise.all([getMerchantOrders(), getGuests()])
+    const guests = guestRes.data || []
+    const registered = new Set(guests.map((g) => g.order_id))
+    const orderList = orderRes.data?.items || []
+    orderOptions.value = orderList.filter(
+      (o) => ['paid', 'checked_in'].includes(o.order_status) && !registered.has(o.id)
+    )
+  } catch (e) {
+    orderOptions.value = []
+  } finally {
+    ordersLoading.value = false
+  }
+}
 
 const formatTime = (v) => (v ? new Date(v).toLocaleString('zh-CN') : '')
 
@@ -66,6 +104,10 @@ const fetchGuests = async () => {
 const submit = async () => {
   if (!form.order_id) {
     ElMessage.warning('请输入订单号')
+    return
+  }
+  if (!form.order_id) {
+    ElMessage.warning('请选择要登记的订单')
     return
   }
   submitting.value = true
@@ -92,6 +134,11 @@ onMounted(fetchGuests)
 </script>
 
 <style scoped>
+.empty-tip {
+  font-size: 12px;
+  color: #909399;
+  margin-top: 4px;
+}
 .card-header { display: flex; justify-content: space-between; align-items: center; }
 .card-title { font-weight: 600; }
 </style>

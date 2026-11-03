@@ -185,6 +185,22 @@ def update_order_status(
     order.order_status = payload.status
     if payload.status == "checked_in" and room:
         room.status = "occupied"
+        # 办理入住时自动补一条客人登记记录（幂等，已存在则跳过）
+        existing_guest = db.query(GuestRecord).filter(GuestRecord.order_id == order.id).first()
+        if not existing_guest:
+            guest_user = db.query(User).filter(User.id == order.user_id).first()
+            db.add(
+                GuestRecord(
+                    order_id=order.id,
+                    real_name=(
+                        (guest_user.real_name if guest_user else None)
+                        or (guest_user.username if guest_user else None)
+                        or "客人"
+                    ),
+                    id_card=(guest_user.id_card if guest_user else None),
+                    checkin_time=datetime.now(),
+                )
+            )
     if payload.status == "checked_out" and room:
         room.status = "cleaning"
     if payload.status == "cancelled" and room and order.pay_channel:
