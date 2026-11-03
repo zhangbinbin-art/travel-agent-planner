@@ -187,8 +187,12 @@ def get_posts(
     current_user: Optional[User] = None,
     viewer_id: Optional[int] = None,
     include_all_visibility: bool = False,
+    title_filter=None,
 ):
     query = db.query(Post)
+    # 可选的标题过滤（广场排除测试用的「点评合集」帖）
+    if title_filter is not None:
+        query = query.filter(title_filter)
     # 可见性过滤：public 所有人可见；friend/private 仅作者本人（项目暂无互关关系表）
     if not include_all_visibility:
         visible_conditions = [Post.visible == "public", Post.visible.is_(None)]

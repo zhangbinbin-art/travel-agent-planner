@@ -76,9 +76,15 @@ def list_posts(
                 raise HTTPException(status_code=422, detail="Invalid status")
         else:
             status_filter = None
+    # 广场列表（未指定景点）不展示测试用的「点评合集」帖，避免污染游记广场；
+    # 景点详情按 spot_id 查询时仍会返回，保证点评区与情感统计正常。
+    title_filter = None
+    if spot_id is None:
+        title_filter = ~Post.title.like("【游客点评】%")
     return post_service.get_posts(
         db,
         keyword=keyword,
+        title_filter=title_filter,
         page=page,
         page_size=page_size,
         sort=sort,
