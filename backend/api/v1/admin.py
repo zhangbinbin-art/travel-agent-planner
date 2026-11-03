@@ -28,6 +28,24 @@ from schemas.hotel_audit import AuditRejectRequest
 router = APIRouter()
 
 
+@router.get("/stats")
+def admin_stats(db: Session = Depends(get_db), current_user: User = Depends(require_admin)):
+    """管理员平台总览统计（含待审核数量，供卡片点击跳转）。"""
+    from models import Comment, HotelProfile, HotelCertification, Post, Spot
+
+    return {
+        "user_count": db.query(User).filter(User.role == "user").count(),
+        "merchant_count": db.query(User).filter(User.role == "merchant").count(),
+        "spot_count": db.query(Spot).count(),
+        "post_count": db.query(Post).count(),
+        "order_count": db.query(HotelOrder).count(),
+        "pending_posts": db.query(Post).filter(Post.status == 0).count(),
+        "pending_comments": db.query(Comment).filter(Comment.status == 0).count(),
+        "pending_hotel_audits": db.query(HotelProfile).filter(HotelProfile.status == "pending").count()
+        + db.query(HotelCertification).filter(HotelCertification.status == "pending").count(),
+    }
+
+
 @router.get("/post/list", response_model=PostListResponse)
 def admin_post_list(
     status: str = Query(""),
@@ -382,3 +400,21 @@ def admin_reject_hotel_audit(
         return hotel_audit_service.reject(db, kind, item_id, payload.reason)
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc))
+
+
+@router.delete("/comment/{comment_id}")
+def admin_delete_comment(
+    comment_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(require_admin),
+):
+    """删除违规评论（连带其点赞记录）。"""
+    from models import Comment, CommentLike
+
+    comment = db.query(Comment).filter(Comment.id == comment_id).first()
+    if not comment:
+        raise HTTPException(status_code=404, detail="评论不存在")
+    db.query(CommentLike).filter(CommentLike.comment_id == comment_id).delete()
+    db.delete(comment)
+    db.commit()
+    return {"ok": True}

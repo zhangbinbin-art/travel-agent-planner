@@ -1,11 +1,16 @@
 <template>
   <div class="merchant-audit">
     <!-- ============ 酒店资料 / 资质审核 ============ -->
-    <el-card shadow="never" class="audit-card">
+    <el-card v-if="kindTab !== 'account'" shadow="never" class="audit-card">
       <template #header>
         <div class="card-header">
-          <span class="card-title">酒店资料 & 资质审核</span>
+          <span class="card-title">商家审核</span>
           <div class="header-actions">
+            <el-radio-group v-model="kindTab" size="small">
+              <el-radio-button value="profile">酒店资料审核</el-radio-button>
+              <el-radio-button value="cert">酒店资质审核</el-radio-button>
+              <el-radio-button value="account">商家账号审核</el-radio-button>
+            </el-radio-group>
             <el-input
               v-model="keyword"
               placeholder="手机号 / 酒店名称"
@@ -27,7 +32,7 @@
       </el-tabs>
 
       <div v-loading="hotelLoading" class="audit-list">
-        <article v-for="item in hotelAudits" :key="item.kind + '-' + item.id" class="audit-item">
+        <article v-for="item in visibleAudits" :key="item.kind + '-' + item.id" class="audit-item">
           <div class="audit-head">
             <div class="audit-title">
               <el-tag size="small" :type="item.kind === 'profile' ? 'primary' : 'warning'">
@@ -93,12 +98,12 @@
           </div>
         </article>
 
-        <EmptyState v-if="!hotelLoading && !hotelAudits.length" description="暂无待审核记录" />
+        <EmptyState v-if="!hotelLoading && !visibleAudits.length" description="暂无审核记录" />
       </div>
     </el-card>
 
     <!-- ============ 商家账号审核（原有逻辑保留） ============ -->
-    <el-card shadow="never">
+    <el-card v-else shadow="never">
       <template #header>
         <div class="card-header">
           <span class="card-title">商家账号审核</span>
@@ -148,7 +153,8 @@
 </template>
 
 <script setup>
-import { onMounted, ref } from 'vue'
+import { computed, onMounted, ref, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { auditMerchant, approveHotelAudit, getHotelAudits, getMerchantList, rejectHotelAudit } from '@/api/hotel'
 import EmptyState from '@/components/EmptyState.vue'
@@ -161,6 +167,25 @@ const hotelAudits = ref([])
 const hotelLoading = ref(false)
 const auditStatus = ref('pending')
 const keyword = ref('')
+const route = useRoute()
+const router = useRouter()
+const KIND_TABS = ['profile', 'cert', 'account']
+const kindTab = ref(KIND_TABS.includes(route.query.tab) ? route.query.tab : 'profile')
+
+// 当前 tab 下展示的审核记录（profile / cert）
+const visibleAudits = computed(() =>
+  hotelAudits.value.filter((item) => item.kind === kindTab.value)
+)
+
+watch(
+  () => route.query.tab,
+  (val) => {
+    if (KIND_TABS.includes(val)) {
+      kindTab.value = val
+      if (val !== 'account') fetchHotelAudits()
+    }
+  }
+)
 
 const statusText = (s) => ({ pending: '待审核', approved: '已通过', rejected: '已驳回' }[s] || s)
 const statusType = (s) => ({ pending: 'warning', approved: 'success', rejected: 'danger' }[s] || 'info')

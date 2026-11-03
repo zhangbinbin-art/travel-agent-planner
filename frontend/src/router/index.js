@@ -27,11 +27,20 @@ const routes = [
       { path: 'user/my-fans', name: 'MyFans', component: () => import('@/views/user/MyFans.vue') },
       { path: 'user/:userId', name: 'UserProfile', component: () => import('@/views/user/UserProfile.vue') },
       { path: 'plan', name: 'Plan', meta: { keepAlive: true }, component: () => import('@/views/plan/Plan.vue') },
-      { path: 'admin', name: 'AdminIndex', component: () => import('@/views/admin/AdminIndex.vue') },
-      { path: 'admin/post-review', name: 'AdminPostReview', component: () => import('@/views/admin/PostReview.vue') },
-      { path: 'admin/merchant', name: 'AdminMerchantAudit', component: () => import('@/views/admin/MerchantAudit.vue') },
-      { path: 'admin/data', name: 'AdminPlatformData', component: () => import('@/views/admin/PlatformData.vue') },
-      { path: 'admin/spot', name: 'AdminSpotManage', component: () => import('@/views/admin/SpotManage.vue') }
+
+    ]
+  },
+  {
+    // 管理员独立后台（不使用客户端顶部导航）
+    path: '/admin',
+    component: () => import('@/components/layout/AdminLayout.vue'),
+    children: [
+      { path: '', name: 'AdminDashboard', component: () => import('@/views/admin/AdminDashboard.vue') },
+      { path: 'spot', name: 'AdminSpotManage', component: () => import('@/views/admin/SpotManage.vue') },
+      { path: 'post-audit', name: 'AdminPostAudit', component: () => import('@/views/admin/PostReview.vue') },
+      { path: 'comment-audit', name: 'AdminCommentAudit', component: () => import('@/views/admin/CommentReview.vue') },
+      { path: 'merchant-audit', name: 'AdminMerchantAudit', component: () => import('@/views/admin/MerchantAudit.vue') },
+      { path: 'data', name: 'AdminPlatformData', component: () => import('@/views/admin/PlatformData.vue') }
     ]
   },
   {

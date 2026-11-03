@@ -45,21 +45,6 @@
           </el-button>
         </div>
 
-        <el-dropdown v-if="auth.role === 'admin'" trigger="click" @command="go">
-          <el-button class="tr-admin-btn">
-            管理员后台
-            <el-icon class="tr-caret"><ArrowDown /></el-icon>
-          </el-button>
-          <template #dropdown>
-            <el-dropdown-menu>
-              <el-dropdown-item command="/admin/post-review">内容审核</el-dropdown-item>
-              <el-dropdown-item command="/admin/merchant">商家审核</el-dropdown-item>
-              <el-dropdown-item command="/admin/spot">景点管理</el-dropdown-item>
-              <el-dropdown-item command="/admin/data">平台总览</el-dropdown-item>
-            </el-dropdown-menu>
-          </template>
-        </el-dropdown>
-
         <template v-if="auth.token">
           <span class="tr-user">
             <el-icon class="tr-user-icon"><UserFilled /></el-icon>
@@ -82,7 +67,7 @@
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { ArrowDown, ChatDotRound, UserFilled } from '@element-plus/icons-vue'
+import { ChatDotRound, UserFilled } from '@element-plus/icons-vue'
 import { auth, clearAuth } from '@/utils/auth'
 import { getConversations } from '@/api/social'
 import ConversationList from '@/components/message/ConversationList.vue'
