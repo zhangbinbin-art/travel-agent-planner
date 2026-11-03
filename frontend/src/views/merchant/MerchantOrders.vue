@@ -44,13 +44,18 @@
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { getMerchantOrders, updateMerchantOrderStatus } from '@/api/hotel'
 
+const route = useRoute()
 const orders = ref([])
 const loading = ref(false)
-const statusFilter = ref('')
+// 支持从仪表盘带 ?status= 进来，自动激活对应筛选
+const allowedStatus = ['pending_pay', 'paid', 'checked_in', 'checked_out', 'cancelled']
+const normalizeStatus = (value) => (allowedStatus.includes(String(value)) ? String(value) : '')
+const statusFilter = ref(normalizeStatus(route.query.status))
 
 const formatMoney = (v) => (Number.isNaN(Number(v)) ? '0.00' : Number(v).toFixed(2))
 const statusText = (s) =>
@@ -85,6 +90,14 @@ const setStatus = async (row, status) => {
     ElMessage.error(e?.response?.data?.detail || '操作失败')
   }
 }
+
+watch(
+  () => route.query.status,
+  (val) => {
+    statusFilter.value = normalizeStatus(val)
+    fetchOrders()
+  }
+)
 
 onMounted(fetchOrders)
 </script>
