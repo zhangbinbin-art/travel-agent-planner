@@ -39,6 +39,9 @@ class Spot(Base):
     score = Column(Float, default=0)
     price = Column(Float, nullable=True, default=0)
     cover = Column(String(255), nullable=True)
+    # v0.18 批量导入补充字段
+    address = Column(String(255), nullable=True)
+    heat = Column(Integer, default=0)
     # 经纬度用双精度：MySQL 下 Float 为 4 字节单精度，会丢失 1e-4 量级（约 10m）
     lat = Column(Float(53), nullable=True)
     lng = Column(Float(53), nullable=True)
