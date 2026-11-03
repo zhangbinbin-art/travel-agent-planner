@@ -4,18 +4,22 @@
 
     <el-select
       :model-value="modelValue"
-      placeholder="请选择酒店"
+      :placeholder="selectPlaceholder"
       clearable
       :disabled="disabled"
+      :filterable="!generatedMode"
+      :remote="!generatedMode"
+      :remote-method="remoteSearch"
+      :loading="searching"
       class="hotel-select"
       @update:model-value="onSelect"
     >
-      <el-option-group v-if="allowCustom" label="自定义">
+      <el-option-group v-if="allowCustom && !generatedMode" label="自定义">
         <el-option label="自定义食宿单价" value="" />
       </el-option-group>
-      <el-option-group label="平台酒店" :disabled="disabled">
+      <el-option-group :label="generatedMode ? '行程配套酒店' : '平台酒店'" :disabled="disabled">
         <el-option
-          v-for="h in hotels"
+          v-for="h in visibleHotels"
           :key="h.id"
           :value="h.id"
           :label="h.name + '｜¥' + formatMoney(h.price_per_day) + '/天'"
@@ -32,7 +36,8 @@
       </el-option-group>
     </el-select>
 
-    <div v-if="!hotels.length" class="empty-tip">{{ emptyText }}</div>
+    <div v-if="generatedMode" class="mode-tip">{{ modeHint }}</div>
+    <div v-if="!visibleHotels.length" class="empty-tip">{{ emptyText }}</div>
 
     <HotelDetailDialog v-model="dialogVisible" :hotel="detailHotel" />
   </div>
@@ -58,7 +63,11 @@ const props = defineProps({
   // 父组件递增该值可重置筛选条件（用于“重置”按钮）
   resetSignal: { type: Number, default: 0 },
   // 父组件一次性下发筛选条件（用于 keep-alive/sessionStorage 回退恢复）
-  filterSeed: { type: Object, default: null }
+  filterSeed: { type: Object, default: null },
+  // 是否已生成路线：true 时只用本次行程返回的 hotel_markers，禁止自由搜索
+  generated: { type: Boolean, default: false },
+  // 后端 route.hotel_markers：[{ id, name, price, cover, description, address }]
+  hotelMarkers: { type: Array, default: () => [] }
 })
 const emit = defineEmits(['update:modelValue', 'change', 'filters-change'])
 
@@ -80,6 +89,51 @@ const disabled = computed(() => {
   if (props.cityList !== undefined) return !props.cityList.length
   return false
 })
+
+const searching = ref(false)
+const searchKeyword = ref('')
+
+// 已生成路线：把后端 hotel_markers 映射成下拉选项（价格字段名对齐平台酒店）
+const markerHotels = computed(() =>
+  (props.hotelMarkers || []).map((h) => ({
+    id: h.id,
+    name: h.name,
+    price_per_day: h.price,
+    cover_img: h.cover,
+    description: h.description,
+    address: h.address,
+    _fromMarker: true
+  }))
+)
+
+// 生成态下只按「类型 + 价格」过滤（marker 没有环境/服务分）
+const generatedHotels = computed(() => {
+  const f = filters.value
+  const [minP, maxP] = f.price || [0, 2000]
+  return markerHotels.value.filter((h) => {
+    if (f.types?.length && !f.types.includes(inferHotelType(h.name))) return false
+    const price = Number(h.price_per_day) || 0
+    if (minP > 0 && price < minP) return false
+    if (maxP < 2000 && price > maxP) return false
+    return true
+  })
+})
+
+// 已生成路线且接口确实返回了配套酒店时才锁定；若该目的地没有配套酒店，
+// 退回“可搜索平台酒店”，否则用户永远选不到酒店、提交预约按钮一直是灰的
+const generatedMode = computed(() => props.generated && markerHotels.value.length > 0)
+
+const visibleHotels = computed(() => (generatedMode.value ? generatedHotels.value : hotels.value))
+
+const selectPlaceholder = computed(() =>
+  generatedMode.value ? '选择本次行程配套酒店' : '可输入酒店名称搜索酒店'
+)
+
+const modeHint = computed(() =>
+  generatedMode.value
+    ? '当前行程配套周边酒店，不可搜索其他酒店'
+    : '可输入酒店名称搜索酒店'
+)
 
 const emptyText = computed(() => {
   if (disabled.value) return '请先填写目标地区，再筛选酒店'
@@ -129,6 +183,12 @@ const clearSelectionIfInvalid = () => {
 }
 
 const fetchHotels = async () => {
+  // 生成态且有配套酒店：选项完全来自行程返回的 hotel_markers，不请求酒店接口
+  if (generatedMode.value) {
+    hotels.value = []
+    sourcePool.value = []
+    return
+  }
   if (disabled.value) {
     hotels.value = []
     sourcePool.value = []
@@ -148,9 +208,29 @@ const fetchHotels = async () => {
   }
 }
 
+// 未生成路线时的远程搜索：按名称过滤（后端 list 无 keyword 参数，前端过滤）
+const remoteSearch = async (keyword) => {
+  if (generatedMode.value) return
+  searchKeyword.value = keyword || ''
+  searching.value = true
+  try {
+    const res = await getOnShelfHotels({})
+    const pool = res.data?.items || []
+    sourcePool.value = pool
+    const kw = searchKeyword.value.trim().toLowerCase()
+    const base = kw ? pool.filter((h) => String(h.name || '').toLowerCase().includes(kw)) : pool
+    hotels.value = applyFilters(base)
+  } catch (e) {
+    sourcePool.value = []
+    hotels.value = []
+  } finally {
+    searching.value = false
+  }
+}
+
 const onSelect = (val) => {
   emit('update:modelValue', val)
-  const hotel = hotels.value.find((h) => h.id === val) || null
+  const hotel = visibleHotels.value.find((h) => h.id === val) || null
   emit('change', hotel)
 }
 
@@ -159,6 +239,21 @@ const openDetail = (hotel) => {
   dialogVisible.value = true
 }
 
+// 生成态切换：进入生成态校验已选酒店是否在配套列表内，退出生成态重新拉取
+watch(
+  [() => props.generated, () => props.hotelMarkers.length],
+  () => {
+    if (generatedMode.value) {
+      const ids = markerHotels.value.map((h) => h.id)
+      if (props.modelValue !== '' && !ids.includes(props.modelValue)) {
+        emit('update:modelValue', '')
+        emit('change', null)
+      }
+    } else {
+      fetchHotels()
+    }
+  }
+)
 watch(() => props.city, () => fetchHotels())
 watch(() => props.cityList, () => fetchHotels(), { deep: true })
 watch(
@@ -227,5 +322,10 @@ onMounted(fetchHotels)
   color: #909399;
   font-size: 12px;
   margin-top: 6px;
+}
+.mode-tip {
+  margin-top: 6px;
+  font-size: 12px;
+  color: #7b8794;
 }
 </style>

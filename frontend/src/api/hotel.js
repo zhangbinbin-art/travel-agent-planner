@@ -13,7 +13,7 @@ export const updateBookingStatus = (id, status) =>
   api.put(`/api/v1/merchant/booking/${id}/status`, { status })
 
 // 游客侧接口
-export const getOnShelfHotels = () => api.get('/api/v1/hotel/list')
+export const getOnShelfHotels = (params) => api.get('/api/v1/hotel/list', { params })
 export const createHotelBooking = (data) => api.post('/api/v1/hotel/booking', data)
 export const getMyBookings = () => api.get('/api/v1/hotel/my-booking')
 

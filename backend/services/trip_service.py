@@ -737,6 +737,9 @@ def recommend_hotels(db: Session, payload) -> list:
             "facilities": h.facilities,
             "env_score": h.env_score,
             "service_score": h.service_score,
+            # 仅用于行程地图打点，不参与距离矩阵 / 路径排序
+            "lng": h.lng,
+            "lat": h.lat,
             "hotel_type": _hotel_type(h.name),
             "status": h.status,
         }
@@ -902,8 +905,44 @@ def smart_recommend(db: Session, payload) -> dict:
                 }
             )
 
+    # ------------------------------------------------------------------
+    # 地图点位拆分（v0.14）
+    #   route_list    : 只有景点，顺序与贪心/最近邻算法结果完全一致，用于连线
+    #   hotel_markers : 只有酒店，仅打点展示，不送入距离矩阵、不参与路径排序
+    # 说明：两者都只做可视化，里程与预算仍由后端 Haversine/模拟距离计算。
+    # ------------------------------------------------------------------
+    route_list = [
+        {"id": item.id, "name": item.name, "lng": item.lng, "lat": item.lat, "type": "spot"}
+        for item in route
+        if item.lng is not None and item.lat is not None
+    ]
+    hotel_markers = []
+    seen_hotel_ids = set()
+    for hotel in hotels or []:
+        hotel_id = hotel.get("id")
+        lng = hotel.get("lng")
+        lat = hotel.get("lat")
+        if hotel_id in seen_hotel_ids or lng is None or lat is None:
+            continue
+        seen_hotel_ids.add(hotel_id)
+        hotel_markers.append(
+            {
+                "id": hotel_id,
+                "name": hotel.get("name"),
+                "lng": float(lng),
+                "lat": float(lat),
+                "price": float(hotel.get("price_per_day") or 0),
+                "cover": hotel.get("cover_img"),
+                "description": hotel.get("description"),
+                "address": hotel.get("address"),
+                "type": "hotel",
+            }
+        )
+
     return {
         "route": route,
+        "route_list": route_list,
+        "hotel_markers": hotel_markers,
         "legs": legs,
         "total_distance": total_distance,
         "departure_distance": departure_distance,

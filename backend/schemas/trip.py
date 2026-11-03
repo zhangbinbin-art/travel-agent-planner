@@ -38,6 +38,9 @@ class SmartNode(BaseModel):
 
 class SmartRecommendResponse(BaseModel):
     route: List["RouteSpot"]
+    # v0.14 地图点位拆分：景点参与路线，酒店只打点
+    route_list: List[dict] = Field(default_factory=list)
+    hotel_markers: List[dict] = Field(default_factory=list)
     total_distance: float
     legs: List["RouteLeg"]
     budget: "TripBudget"

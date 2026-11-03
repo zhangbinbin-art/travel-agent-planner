@@ -1,11 +1,28 @@
 <template>
   <div class="plan">
-    <el-card>
-      <template #header>
-        <span class="card-title">智能路线规划</span>
-      </template>
-      <el-row :gutter="16">
-        <el-col :xs="24" :md="8">
+    <section class="page-card">
+      <header class="page-head">
+        <div class="page-heading">
+          <span class="tr-section-sub">AI PLANNER</span>
+          <h1 class="tr-section-title">智能路线规划</h1>
+        </div>
+      </header>
+
+      <div class="action-bar">
+        <el-button type="primary" :loading="generating" @click="handleGenerate">生成路线</el-button>
+        <el-button :disabled="!routeData" :loading="generating" @click="handleRegenerate">重新生成</el-button>
+        <el-button :disabled="!routeData" :loading="saving" @click="handleSave">保存路线</el-button>
+        <el-button :disabled="!routeData" @click="exportRoute">导出路线</el-button>
+        <el-input
+          v-model="planName"
+          class="plan-name-input"
+          placeholder="路线名称（保存用）"
+        />
+        <el-button text @click="handleReset">重置</el-button>
+      </div>
+
+      <div class="plan-grid">
+        <div class="plan-col plan-col--left">
           <div class="panel">
             <div class="panel-title">智能偏好设置</div>
 
@@ -27,7 +44,15 @@
 
             <div class="form-block">
               <div class="section-label">目标地区（单城市）</div>
-              <el-input v-model="targetCity" placeholder="例如：杭州" clearable />
+              <div class="target-city-row">
+                <el-input
+                  v-model="targetCity"
+                  placeholder="例如：杭州"
+                  clearable
+                  @keyup.enter="handleGenerate"
+                />
+                <el-button type="primary" :loading="generating" @click="handleGenerate">搜索路线</el-button>
+              </div>
             </div>
 
             <div class="form-block">
@@ -49,45 +74,28 @@
               <el-input-number v-model="days" :min="1" :max="10" />
             </div>
 
-            <div class="form-block">
-              <div class="section-label">酒店筛选与选择</div>
-              <HotelPicker
-                v-model="selectedHotelId"
-                :city="targetCity.trim()"
-                :require-city="true"
-                :allow-custom="true"
-                :reset-signal="hotelResetSignal"
-                :filter-seed="hotelFilterSeed"
-                @change="onHotelChange"
-                @filters-change="hotelFilters = $event"
-              />
-            </div>
+            <div class="hotel-block">
+              <div class="panel-title">酒店预订（可选）</div>
 
-            <div class="hotel-section">
-              <div class="section-label">单日食宿费用（元/天）</div>
-              <el-input-number
-                v-model="hotelPerDay"
-                :min="0"
-                :max="100000"
-                :step="50"
-                :disabled="!!selectedHotelId"
-              />
-            </div>
-            <div class="hotel-hint">
-              {{ selectedHotelId ? '已按所选酒店单价自动带入预算' : '自定义价格仅用于预算估算，无法提交预约' }}
-            </div>
+              <div class="form-block">
+                <div class="section-label">酒店筛选与选择</div>
+                <HotelPicker
+                  v-model="selectedHotelId"
+                  :city="targetCity.trim()"
+                  :allow-custom="!hasGeneratedRoute"
+                  :generated="hasGeneratedRoute"
+                  :hotel-markers="routeData?.hotel_markers || []"
+                  :reset-signal="hotelResetSignal"
+                  :filter-seed="hotelFilterSeed"
+                  @change="onHotelChange"
+                  @filters-change="hotelFilters = $event"
+                />
+              </div>
 
-            <div class="actions">
-              <el-button type="primary" :loading="generating" @click="handleGenerate">
-                生成智能行程
-              </el-button>
-              <el-button @click="handleReset">重置</el-button>
-            </div>
+              <div v-if="selectedHotelId" class="hotel-hint">已按所选酒店单价自动带入预算</div>
 
-            <el-divider />
-            <div class="booking-block">
-              <div class="panel-title">酒店预约（可选）</div>
-              <el-form label-width="90px">
+              <div class="booking-block">
+                <el-form label-width="90px">
                 <el-form-item label="入住日期">
                   <el-date-picker
                     v-model="bookingStart"
@@ -121,16 +129,14 @@
                   >
                     提交酒店预约
                   </el-button>
-                  <span v-if="!selectedHotelId" class="booking-tip">
-                    自定义价格仅用于预算估算，无法提交预约
-                  </span>
                 </el-form-item>
               </el-form>
+              </div>
             </div>
           </div>
-        </el-col>
+        </div>
 
-        <el-col :xs="24" :md="16">
+        <div class="plan-col plan-col--right">
           <div class="panel" v-if="routeData">
             <div class="panel-title">路线结果</div>
             <div class="summary">
@@ -209,7 +215,13 @@
             <el-divider content-position="left">路线图</el-divider>
             <el-tabs v-model="routeView" class="route-view-tabs" @tab-change="onRouteViewChange">
               <el-tab-pane label="高德地图" name="map">
-                <div v-show="mapVisible" ref="mapRef" class="plan-map"></div>
+                <div v-show="mapVisible" class="map-wrap">
+                  <div ref="mapRef" class="plan-map"></div>
+                  <div class="map-legend">
+                    <span class="legend-item"><i class="legend-dot legend-spot"></i>游览景点</span>
+                    <span class="legend-item"><i class="legend-dot legend-hotel"></i>周边酒店</span>
+                  </div>
+                </div>
                 <el-empty
                   v-if="!mapVisible"
                   description="地图暂不可用，可切换到“路线示意图”查看"
@@ -221,16 +233,11 @@
               </el-tab-pane>
             </el-tabs>
 
-            <el-divider content-position="left">保存方案</el-divider>
-            <div class="save-row">
-              <el-input v-model="planName" placeholder="给这条路线起个名字" class="plan-name-input" />
-              <el-button type="primary" :loading="saving" :disabled="!routeData" @click="handleSave">保存方案</el-button>
-            </div>
           </div>
           <el-empty v-else description="请填写偏好并生成智能行程" />
-        </el-col>
-      </el-row>
-    </el-card>
+        </div>
+      </div>
+    </section>
 
     <el-dialog v-model="mapDialogVisible" title="地图选点（回填位置与经纬度）" width="520px">
       <el-form label-width="80px">
@@ -333,6 +340,10 @@ const savedTripId = ref(null)
 
 const generating = ref(false)
 const routeData = ref(null)
+// 酒店下拉的两套交互：
+//   false = 尚未生成路线 -> 允许手动搜索任意酒店
+//   true  = 已生成路线   -> 只允许选择本次行程返回的 hotel_markers（周边配套酒店）
+const hasGeneratedRoute = ref(false)
 const planName = ref('')
 const saving = ref(false)
 
@@ -347,6 +358,7 @@ let amapApi = null
 let mapInstance = null
 let mapOverlays = []
 let mapInfoWindow = null
+let hotelInfoWindow = null
 let drivingRouters = []
 let mapRenderToken = 0
 // Tab 未激活时不初始化（隐藏容器宽高为 0，初始化会得到错误尺寸），切回时再补渲染
@@ -466,11 +478,9 @@ const timelineItems = computed(() => {
 
   if (nodes.length) {
     nodes.forEach((node) => {
-      if (node.node_type === 'hotel') {
-        pushHotel(node.day || 1)
-      } else {
-        pushSpot(node)
-      }
+      // 文字行程只渲染景点；酒店只在地图上打点，不进入日程列表
+      if (node.node_type === 'hotel') return
+      pushSpot(node)
     })
   } else {
     // 兼容旧数据：无 nodes 时按景点顺序渲染
@@ -675,6 +685,12 @@ const clearPlanCache = () => {
   }
 }
 
+// 重新生成：先重置为“未生成路线”状态（酒店恢复可搜索），再重新请求行程
+const handleRegenerate = async () => {
+  hasGeneratedRoute.value = false
+  await handleGenerate()
+}
+
 const handleGenerate = async () => {
   if (!targetCity.value || !targetCity.value.trim()) {
     ElMessage.warning('请输入目标地区（单城市）')
@@ -700,6 +716,8 @@ const handleGenerate = async () => {
       ...buildHotelFilterPayload()
     })
     routeData.value = res.data
+    // 生成成功 -> 进入“已生成路线”状态，酒店下拉锁定为本次行程配套酒店
+    hasGeneratedRoute.value = true
     planName.value = ''
     savedTripId.value = null
     const autoHotel = res.data?.recommended_hotel
@@ -742,6 +760,8 @@ const resetAll = (clearCache = false) => {
   selectedHotel.value = null
   autoHotelApplied.value = false
   routeData.value = null
+  // 重置路线 -> 回到“未生成路线”状态，酒店下拉恢复可搜索
+  hasGeneratedRoute.value = false
   planName.value = ''
   generatedHotelPerDay.value = null
   savedTripId.value = null
@@ -890,7 +910,7 @@ const escapeMarkup = (text) =>
 
 // 自绘 Marker：序号徽标 + 景点名，起点用绿色区分
 const buildMarkerHtml = (badge, name, isStart) => {
-  const bg = isStart ? '#67c23a' : '#409eff'
+  const bg = isStart ? '#67c23a' : '#ff7a2f'
   return (
     '<div style="display:flex;align-items:center;gap:6px;transform:translate(-50%,-100%);white-space:nowrap;">'
     + `<span style="display:inline-flex;align-items:center;justify-content:center;min-width:22px;height:22px;padding:0 4px;border-radius:11px;background:${bg};color:#fff;font-size:12px;font-weight:600;box-shadow:0 2px 6px rgba(0,0,0,.3);">${escapeMarkup(badge)}</span>`
@@ -904,8 +924,19 @@ const isValidCoord = (lng, lat) =>
   && Math.abs(lat) <= 90 && Math.abs(lng) <= 180
   && !(lng === 0 && lat === 0)
 
-// 严格按后端返回顺序组装点位：出发地 -> 第1站 -> 第2站 ...，不做任何重排
-const buildMapPoints = (data) => {
+// 酒店 Marker：蓝色房子图标，与橙色景点标记视觉区分（只打点，不进路线）
+const buildHotelMarkerHtml = (name) => (
+  '<div style="display:flex;flex-direction:column;align-items:center;transform:translate(-50%,-100%);white-space:nowrap;">'
+  + '<svg width="26" height="30" viewBox="0 0 30 34" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">'
+  + '<path d="M15 1C7.3 1 1 7.2 1 14.9c0 9.6 11.6 17.4 13.2 18.4a1.6 1.6 0 0 0 1.6 0C17.4 32.3 29 24.5 29 14.9 29 7.2 22.7 1 15 1z" fill="#3b82f6" stroke="#1d4ed8" stroke-width="1.6"/>'
+  + '<path d="M9.4 14.6 15 9.7l5.6 4.9v6.1a.8.8 0 0 1-.8.8h-3.1v-3.9h-3.4v3.9h-3.1a.8.8 0 0 1-.8-.8z" fill="#fff"/>'
+  + '</svg>'
+  + `<span style="margin-top:2px;font-size:11px;color:#1d4ed8;background:rgba(255,255,255,.94);padding:1px 6px;border-radius:6px;box-shadow:0 1px 4px rgba(0,0,0,.2);">${escapeMarkup(name)}</span>`
+  + '</div>'
+)
+
+// 景点点位：优先使用后端 route_list（只含景点），兼容旧数据的 route；严格按返回顺序，不做重排
+const buildSpotPoints = (data) => {
   const points = []
   const startLng = Number(data?.start_lng)
   const startLat = Number(data?.start_lat)
@@ -919,9 +950,11 @@ const buildMapPoints = (data) => {
       isStart: true
     })
   }
+  const spotList = Array.isArray(data?.route_list) && data.route_list.length
+    ? data.route_list
+    : (Array.isArray(data?.route) ? data.route : [])
   let seq = 0
-  const route = Array.isArray(data?.route) ? data.route : []
-  route.forEach((spot) => {
+  spotList.forEach((spot) => {
     const lng = Number(spot?.lng)
     const lat = Number(spot?.lat)
     if (!isValidCoord(lng, lat)) return
@@ -937,7 +970,62 @@ const buildMapPoints = (data) => {
   return points
 }
 
+// 酒店点位：只用于地图打点，绝不参与路线连线 / 距离计算
+const buildHotelPoints = (data) => {
+  const list = Array.isArray(data?.hotel_markers) ? data.hotel_markers : []
+  return list
+    .map((hotel) => ({
+      id: hotel?.id,
+      name: hotel?.name || '酒店',
+      lng: Number(hotel?.lng),
+      lat: Number(hotel?.lat),
+      price: Number(hotel?.price) || 0,
+      description: String(hotel?.description || ''),
+      address: String(hotel?.address || '')
+    }))
+    .filter((hotel) => isValidCoord(hotel.lng, hotel.lat))
+}
+
+// 酒店弹窗：名称 + 地址 + 简介 + 价格 + 查看详情按钮（点击跳转酒店详情页）
+const openHotelInfoWindow = (hotel) => {
+  if (!mapInstance || !amapApi) return
+  if (!hotelInfoWindow) {
+    hotelInfoWindow = new amapApi.InfoWindow({ offset: new amapApi.Pixel(0, -34), isCustom: true })
+  }
+  const box = document.createElement('div')
+  box.style.cssText =
+    'min-width:210px;max-width:260px;background:#fff;border:2px solid #222;border-radius:12px;'
+    + 'padding:10px 12px;box-shadow:0 8px 20px rgba(0,0,0,.2);box-sizing:border-box;'
+  const desc = hotel.description ? hotel.description.slice(0, 46) : '暂无简介'
+  box.innerHTML =
+    `<div style="font-size:14px;font-weight:800;color:#222;margin-bottom:2px;">${escapeMarkup(hotel.name)}</div>`
+    + (hotel.address
+      ? `<div style="font-size:11.5px;color:#7b8794;margin-bottom:4px;">${escapeMarkup(hotel.address)}</div>`
+      : '')
+    + `<div style="font-size:12px;color:#5a6472;line-height:1.5;margin-bottom:8px;">${escapeMarkup(desc)}</div>`
+    + '<div style="display:flex;align-items:center;justify-content:space-between;gap:8px;">'
+    + `<span style="font-size:14px;font-weight:800;color:#f06818;">¥${hotel.price}<span style="font-size:11px;font-weight:500;color:#7b8794;">/晚</span></span>`
+    + '<button type="button" style="border:none;background:#ff7a2f;color:#fff;font-size:12px;font-weight:700;padding:5px 10px;border-radius:8px;cursor:pointer;">查看酒店详情</button>'
+    + '</div>'
+  const detailBtn = box.querySelector('button')
+  if (detailBtn) {
+    detailBtn.addEventListener('click', () => {
+      hotelInfoWindow.close()
+      if (hotel.id) router.push(`/hotel-detail/${hotel.id}`)
+    })
+  }
+  hotelInfoWindow.setContent(box)
+  hotelInfoWindow.open(mapInstance, [hotel.lng, hotel.lat])
+}
+
 const clearMapOverlays = () => {
+  if (hotelInfoWindow) {
+    try {
+      hotelInfoWindow.close()
+    } catch (e) {
+      // 地图已销毁时忽略
+    }
+  }
   if (mapInfoWindow) {
     try {
       mapInfoWindow.close()
@@ -1109,8 +1197,11 @@ const drawDrivingRoute = (points) =>
 const renderRouteMap = async () => {
   const token = ++mapRenderToken
   clearMapOverlays()
-  const points = buildMapPoints(routeData.value)
-  if (!points.length) {
+  // 每次刷新先清空所有 marker / 折线，再按两类点位分别渲染
+  const spotPoints = buildSpotPoints(routeData.value)
+  const hotelPoints = buildHotelPoints(routeData.value)
+  const anchorPoint = spotPoints[0] || hotelPoints[0]
+  if (!anchorPoint) {
     destroyMap()
     mapDirty = false
     return
@@ -1129,7 +1220,7 @@ const renderRouteMap = async () => {
     if (!mapInstance) {
       mapInstance = new amapApi.Map(mapRef.value, {
         zoom: 11,
-        center: [points[0].lng, points[0].lat],
+        center: [anchorPoint.lng, anchorPoint.lat],
         resizeEnable: true,
         dragEnable: true,
         scrollWheel: true,
@@ -1141,7 +1232,9 @@ const renderRouteMap = async () => {
     }
     // 重新生成时先清空旧 Marker / 旧轨迹，再绘制新内容
     clearMapOverlays()
-    mapOverlays = points.map((point, index) => {
+
+    // ① 景点（橙色）：参与路线
+    const spotMarkers = spotPoints.map((point, index) => {
       const marker = new amapApi.Marker({
         position: [point.lng, point.lat],
         content: buildMarkerHtml(point.badge, point.name, point.isStart),
@@ -1165,7 +1258,25 @@ const renderRouteMap = async () => {
       marker.setMap(mapInstance)
       return marker
     })
-    const ok = points.length > 1 ? await drawDrivingRoute(points) : true
+
+    // ② 酒店（蓝色房子）：只打点，不进入 drawDrivingRoute 的坐标数组
+    const hotelMarkers = hotelPoints.map((hotel, index) => {
+      const marker = new amapApi.Marker({
+        position: [hotel.lng, hotel.lat],
+        content: buildHotelMarkerHtml(hotel.name),
+        offset: new amapApi.Pixel(0, 0),
+        zIndex: 200 + index,
+        title: `酒店·${hotel.name}`,
+        bubble: true
+      })
+      marker.on('click', () => openHotelInfoWindow(hotel))
+      marker.setMap(mapInstance)
+      return marker
+    })
+
+    mapOverlays = [...spotMarkers, ...hotelMarkers]
+    // 折线只串联景点（route_list 顺序）；酒店从不参与连线
+    const ok = spotPoints.length > 1 ? await drawDrivingRoute(spotPoints) : true
     if (token !== mapRenderToken) return
     // 高德返回的里程全部丢弃，只用它画轨迹
     if (!ok) throw new Error('驾车路线请求失败')
@@ -1178,6 +1289,41 @@ const renderRouteMap = async () => {
       mapDirty = false
     }
   }
+}
+
+// 导出当前路线为 JSON 文件（纯前端下载，不新增/不调用任何接口）
+const exportRoute = () => {
+  if (!routeData.value) return
+  const name = (planName.value || '').trim() || '智能路线规划'
+  const payload = {
+    name,
+    exported_at: new Date().toISOString(),
+    start_location: startLocation.value || null,
+    start_lat: startLat.value === '' ? null : Number(startLat.value),
+    start_lng: startLng.value === '' ? null : Number(startLng.value),
+    target_city: routeData.value.target_city || targetCity.value,
+    total_distance: routeData.value.total_distance,
+    budget: routeData.value.budget,
+    route: (routeData.value.route || []).map((spot) => ({
+      order: spot.order,
+      name: spot.name,
+      city: spot.city,
+      lng: spot.lng,
+      lat: spot.lat
+    })),
+    legs: routeData.value.legs,
+    day_plans: routeData.value.day_plans
+  }
+  const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json;charset=utf-8' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  link.download = name + '.json'
+  document.body.appendChild(link)
+  link.click()
+  document.body.removeChild(link)
+  URL.revokeObjectURL(url)
+  ElMessage.success('路线已导出')
 }
 
 const handleSave = async () => {
@@ -1341,8 +1487,8 @@ onBeforeUnmount(() => {
   color: #606266;
 }
 .highlight {
-  color: #409eff;
-  font-weight: 600;
+  color: #f06818;
+  font-weight: 700;
 }
 .budget-card {
   border: 1px solid #ebeef5;
@@ -1480,5 +1626,422 @@ onBeforeUnmount(() => {
   font-size: 13px;
   line-height: 18px;
   margin-top: 4px;
+}
+
+/* ================= TR 主题适配（仅样式，逻辑未动） ================= */
+.plan {
+  max-width: 1320px;
+  margin: 0 auto;
+  padding-bottom: 24px;
+  background: transparent;
+}
+.page-card {
+  padding: 20px 22px;
+  background: #fff;
+  border: 2px solid #222;
+  border-radius: 18px;
+  box-shadow: 4px 4px 0 rgba(34, 34, 34, 0.1);
+}
+.page-head {
+  display: flex;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 16px;
+  flex-wrap: wrap;
+  margin-bottom: 14px;
+}
+.page-heading {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+.page-heading .tr-section-title {
+  margin: 0;
+}
+.page-search {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+.page-search :deep(.el-input) {
+  width: 260px;
+}
+.action-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+  padding: 12px 0 16px;
+  margin-bottom: 6px;
+  border-top: 1px dashed rgba(34, 34, 34, 0.12);
+}
+.action-bar .plan-name-input {
+  width: 210px;
+  margin-left: auto;
+}
+.plan > :deep(.el-card) {
+  border: 2px solid #222;
+  border-radius: 16px;
+}
+.panel {
+  border: 2px solid #222;
+  border-radius: 14px;
+  background: #fff;
+  box-shadow: 3px 3px 0 rgba(34, 34, 34, 0.1);
+}
+.panel-title {
+  font-size: 15px;
+  font-weight: 800;
+  color: #222;
+}
+.section-label {
+  color: #5a6472;
+  font-weight: 600;
+}
+.coord-tip {
+  color: #f06818;
+  font-weight: 600;
+}
+.timeline-content {
+  background: #fff;
+  border: 2px solid #222;
+  border-radius: 12px;
+  padding: 10px 12px;
+  box-shadow: 2px 2px 0 rgba(34, 34, 34, 0.08);
+}
+.timeline-content:hover {
+  background: #fff7ef;
+}
+.timeline-title {
+  font-weight: 700;
+  color: #222;
+}
+.timeline-meta {
+  color: #7b8794;
+}
+.timeline-dot {
+  border: 2px solid #222;
+}
+.timeline-dot.spot {
+  background: #ff7a2f;
+}
+.timeline-dot.hotel {
+  background: #4aa3ff;
+}
+.budget-card {
+  background: #fff;
+  border: 2px solid #222;
+  border-radius: 14px;
+  box-shadow: 3px 3px 0 rgba(34, 34, 34, 0.1);
+}
+.budget-row.budget-total {
+  color: #f06818;
+  font-weight: 800;
+}
+.reuse-hint {
+  border: 1px dashed rgba(34, 34, 34, 0.18);
+  background: #f7fbff;
+}
+.plan-map,
+.plan-chart {
+  border: 2px solid #222;
+  border-radius: 14px;
+}
+.plan-map {
+  background: #f7fbff;
+}
+
+/* ===== 地图图例（右下角）：橙色=景点，蓝色房子=酒店 ===== */
+.map-wrap {
+  position: relative;
+}
+.map-legend {
+  position: absolute;
+  right: 12px;
+  bottom: 12px;
+  z-index: 5;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 6px 10px;
+  background: rgba(255, 255, 255, 0.94);
+  border: 2px solid #222;
+  border-radius: 10px;
+  font-size: 12px;
+  color: #222;
+}
+.legend-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.legend-dot {
+  display: inline-block;
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+}
+.legend-spot {
+  background: #ff7a2f;
+}
+.legend-hotel {
+  background: #3b82f6;
+  border-radius: 3px;
+}
+
+/* ==================================================================
+   v0.15 布局防爆框：1440 容器 + 350px/1fr 两栏 + 控件 100% 自适应
+   仅样式，未改动任何业务逻辑
+   ================================================================== */
+.plan {
+  max-width: 1440px;
+  margin: 0 auto;
+  padding: 16px;
+  box-sizing: border-box;
+}
+.page-card {
+  padding: 16px;
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(34, 34, 34, 0.08);
+  box-sizing: border-box;
+}
+
+/* 两栏：左侧固定 350px，右侧自适应；窄屏自动堆叠 */
+.plan-grid {
+  display: grid;
+  grid-template-columns: 350px minmax(0, 1fr);
+  gap: 18px;
+  align-items: start;
+}
+.plan-col {
+  min-width: 0;
+}
+@media (max-width: 1080px) {
+  .plan-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* ================= 左侧偏好面板 ================= */
+.panel {
+  padding: 16px;
+  border-radius: 10px;
+  box-shadow: 0 6px 16px rgba(34, 34, 34, 0.08);
+  min-width: 0;
+  box-sizing: border-box;
+}
+.panel-title {
+  font-size: 18px;
+  margin-bottom: 12px;
+}
+.section-label {
+  font-size: 13px;
+  margin-bottom: 6px;
+}
+.form-block {
+  margin-bottom: 14px;
+}
+.panel :deep(.el-input),
+.panel :deep(.el-select),
+.panel :deep(.el-date-editor),
+.panel :deep(.el-slider) {
+  width: 100%;
+  box-sizing: border-box;
+}
+.panel :deep(.el-form-item) {
+  margin-bottom: 12px;
+}
+.panel :deep(.el-form-item__label) {
+  font-size: 13px;
+}
+.panel :deep(.el-form-item__content) {
+  min-width: 0;
+}
+
+/* 出发位置 / 目标城市：输入框弹性收缩，不撑破 350px */
+.start-location-row,
+.target-city-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.start-city-input {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+.target-city-row :deep(.el-input) {
+  flex: 1 1 150px;
+  min-width: 0;
+}
+
+/* 标签组：自动换行 + 6px 间距 */
+.type-group,
+.pref-group {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.type-group :deep(.el-radio-button__inner),
+.pref-group :deep(.el-checkbox-button__inner) {
+  padding: 6px 10px;
+  font-size: 13px;
+}
+.days-section {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+.days-section :deep(.el-input-number) {
+  width: 110px;
+}
+
+/* ================= 酒店预订板块 ================= */
+.hotel-block {
+  margin-top: 14px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(34, 34, 34, 0.12);
+  min-width: 0;
+}
+.booking-block {
+  min-width: 0;
+}
+.booking-block :deep(.el-date-editor) {
+  width: 100%;
+}
+.booking-block :deep(.el-input-number) {
+  width: 110px;
+}
+
+/* 酒店筛选（HotelFilter 组件内部，需要 :deep） */
+.panel :deep(.hotel-filter) {
+  width: 100%;
+  padding: 10px;
+  border-radius: 10px;
+  box-sizing: border-box;
+  gap: 8px;
+}
+.panel :deep(.filter-row) {
+  gap: 8px;
+  min-width: 0;
+}
+.panel :deep(.filter-label) {
+  width: 58px;
+  font-size: 13px;
+}
+.panel :deep(.filter-tags) {
+  gap: 6px;
+  min-width: 0;
+}
+.panel :deep(.filter-tags .el-checkbox-button__inner) {
+  padding: 4px 8px;
+  font-size: 12px;
+}
+.panel :deep(.price-slider) {
+  gap: 8px;
+  min-width: 0;
+}
+.panel :deep(.price-slider .el-slider) {
+  flex: 1;
+  min-width: 0;
+}
+.panel :deep(.price-text) {
+  font-size: 12px;
+}
+.panel :deep(.score-inputs) {
+  flex-wrap: nowrap;
+  gap: 6px;
+  min-width: 0;
+}
+.panel :deep(.filter-row--score) {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.panel :deep(.filter-row--score .filter-label) {
+  width: auto;
+}
+
+/* ================= 右侧路线结果 ================= */
+.plan-col--right,
+.plan-col--right > .panel {
+  min-width: 0;
+}
+.summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 16px;
+  font-size: 14px;
+}
+.timeline-row {
+  min-width: 0;
+}
+.timeline-content {
+  min-width: 0;
+  overflow: hidden;
+  border-radius: 10px;
+}
+.timeline-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 14px;
+}
+.timeline-meta {
+  font-size: 13px;
+}
+.budget-card {
+  border-radius: 10px;
+  box-shadow: 0 4px 12px rgba(34, 34, 34, 0.06);
+  min-width: 0;
+}
+.budget-row {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 10px;
+  font-size: 14px;
+}
+.budget-row > span:last-child {
+  text-align: right;
+  white-space: nowrap;
+  font-variant-numeric: tabular-nums;
+}
+
+/* ================= 地图 / 图表防溢出 ================= */
+.route-view-tabs {
+  margin-top: 12px;
+}
+.plan-chart,
+.plan-map {
+  border-radius: 10px;
+  overflow: hidden;
+  box-sizing: border-box;
+}
+.map-wrap {
+  overflow: hidden;
+  border-radius: 10px;
+  max-width: 100%;
+}
+.plan-map {
+  height: 420px;
+  width: 100%;
+  box-sizing: border-box;
+}
+/* 强制高德根容器与 canvas 撑满父级，不再溢出 */
+.plan-map :deep(.amap-container),
+.plan-map :deep(.amap-maps),
+.plan-map :deep(.amap-maps > div) {
+  width: 100% !important;
+  height: 100% !important;
+}
+.plan-map :deep(.amap-container canvas) {
+  max-width: 100%;
+}
+
+/* ================= 按钮尺寸统一 ================= */
+.action-bar :deep(.el-button) {
+  padding: 6px 14px;
 }
 </style>

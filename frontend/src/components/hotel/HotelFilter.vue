@@ -13,13 +13,35 @@
         <span class="price-text">¥{{ price[0] }} - ¥{{ price[1] }}</span>
       </div>
     </div>
-    <div class="filter-row">
+    <div class="filter-row filter-row--score">
       <span class="filter-label">最低评分</span>
       <div class="score-inputs">
-        <span>环境</span>
-        <el-input-number v-model="minEnv" :min="0" :max="5" :step="0.1" :precision="1" size="small" :disabled="disabled" />
-        <span>服务</span>
-        <el-input-number v-model="minService" :min="0" :max="5" :step="0.1" :precision="1" size="small" :disabled="disabled" />
+        <span class="score-item">
+          <span class="score-label">环境</span>
+          <el-input-number
+            v-model="minEnv"
+            :min="0"
+            :max="5"
+            :step="0.1"
+            :precision="1"
+            size="small"
+            :disabled="disabled"
+          />
+          <span class="score-unit">分</span>
+        </span>
+        <span class="score-item">
+          <span class="score-label">服务</span>
+          <el-input-number
+            v-model="minService"
+            :min="0"
+            :max="5"
+            :step="0.1"
+            :precision="1"
+            size="small"
+            :disabled="disabled"
+          />
+          <span class="score-unit">分</span>
+        </span>
       </div>
     </div>
     <div class="filter-row">
@@ -110,11 +132,52 @@ const features = computed({
   font-size: 12px;
   white-space: nowrap;
 }
+/* 最低评分：标签单独一行，环境/服务两组控件占满整行，输入框等宽 100px */
+.filter-row--score {
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 6px;
+}
+.filter-row--score .filter-label {
+  width: auto;
+  line-height: 18px;
+}
 .score-inputs {
   display: flex;
   align-items: center;
+  flex-wrap: nowrap;
   gap: 8px;
-  font-size: 13px;
+  width: 100%;
+  min-width: 0;
+}
+.score-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  min-width: 0;
+}
+.score-label {
+  font-size: 12px;
   color: #606266;
+  white-space: nowrap;
+  line-height: 1;
+}
+.score-unit {
+  font-size: 12px;
+  color: #909399;
+  line-height: 1;
+  white-space: nowrap;
+}
+.score-inputs :deep(.el-input-number) {
+  width: 100px;
+  flex: 0 0 100px;
+  box-sizing: border-box;
+}
+.score-inputs :deep(.el-input__wrapper) {
+  padding: 0 6px;
+}
+.score-inputs :deep(.el-input__inner) {
+  font-size: 13px;
+  text-align: center;
 }
 </style>
