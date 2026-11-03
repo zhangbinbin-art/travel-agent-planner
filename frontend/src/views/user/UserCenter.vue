@@ -168,92 +168,128 @@ onMounted(() => {
 </script>
 
 <style scoped>
+/* ===== v0.17 与全站功能页统一：容器宽度/卡片间距/字体/控件尺寸 ===== */
 .user-center {
+  /* 与旅游攻略、旅游景点页一致（1320 居中） */
+  max-width: 1320px;
+  margin: 0 auto;
+  padding: 16px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   gap: 20px;
 }
+
+.user-center :deep(.el-card) {
+  border-radius: 10px;
+  box-shadow: 0 6px 18px rgba(34, 34, 34, 0.08);
+}
+.user-center :deep(.el-card__header) {
+  padding: 14px 20px;
+}
+.user-center :deep(.el-card__body) {
+  padding: 20px;
+}
+
 .card-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
+  gap: 8px;
 }
 .card-title {
-  font-weight: 600;
+  font-size: 16px;
+  font-weight: 800;
+  color: #222;
 }
+
+/* 实名认证信息行 */
 .realname-info {
   display: flex;
   flex-direction: column;
-  gap: 10px;
 }
 .info-row {
   display: flex;
+  align-items: baseline;
   gap: 12px;
-  color: #606266;
+  padding: 9px 0;
+  font-size: 14px;
+  color: #3d4753;
+  border-bottom: 1px dashed rgba(34, 34, 34, 0.08);
 }
-.label {
-  width: 90px;
-  color: #909399;
+.info-row:last-of-type {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+.info-row .label {
+  width: 84px;
+  flex-shrink: 0;
+  font-size: 13px;
+  color: #7b8794;
 }
 .hint {
-  color: #67c23a;
-  font-size: 13px;
+  margin-top: 8px;
+  font-size: 12.5px;
+  color: #7b8794;
 }
 .hint-inline {
-  margin-left: 12px;
+  margin-left: 8px;
+  font-size: 12.5px;
   color: #909399;
-  font-size: 12px;
 }
 
-/* 个人中心 Hub 卡片 */
-.hub-card {
-  border-radius: 12px;
-  box-shadow: 0 2px 12px rgba(0, 0, 0, 0.04);
+/* 表单与按钮尺寸统一（36px 高） */
+.realname-form :deep(.el-form-item) {
+  margin-bottom: 14px;
 }
-.hub-card :deep(.el-card__body) {
-  padding-top: 12px;
+.realname-form :deep(.el-input__wrapper) {
+  min-height: 36px;
+}
+.realname-form :deep(.el-button) {
+  height: 36px;
+  padding: 0 18px;
 }
 
-/* 标签栏：15px 标签，窄屏可横向滚动不换行 */
+/* Tab 栏与攻略页筛选 tab 统一 */
 .hub-tabs :deep(.el-tabs__header) {
-  margin-bottom: 20px;
+  margin-bottom: 16px;
 }
-.hub-tabs :deep(.el-tabs__nav-wrap) {
-  overflow-x: auto;
-  overflow-y: hidden;
+.hub-tabs :deep(.el-tabs__nav-wrap::after) {
+  height: 1px;
+  background-color: rgba(34, 34, 34, 0.1);
 }
 .hub-tabs :deep(.el-tabs__item) {
-  font-size: 15px;
-  white-space: nowrap;
+  height: 40px;
+  font-size: 14px;
+  font-weight: 600;
+  color: #5a6472;
 }
 .hub-tabs :deep(.el-tabs__item.is-active) {
-  color: #2c3e50;
-  font-weight: 700;
+  color: #f06818;
 }
 .hub-tabs :deep(.el-tabs__active-bar) {
-  background-color: #409eff;
+  height: 3px;
+  border-radius: 3px;
+  background-color: #ff7a2f;
 }
 
-/* 内嵌组件外层卡片扁平化，避免卡片套卡片 */
-.hub-tabs :deep(.my-plan > .el-card),
-.hub-tabs :deep(.my-booking > .el-card),
-.hub-tabs :deep(.my-favorite > .el-card) {
-  border: none;
-  box-shadow: none;
-  background: transparent;
-}
-.hub-tabs :deep(.my-plan > .el-card > .el-card__body),
-.hub-tabs :deep(.my-booking > .el-card > .el-card__body),
-.hub-tabs :deep(.my-favorite > .el-card > .el-card__body) {
-  padding: 0;
-}
-.hub-tabs :deep(.my-plan > .el-card > .el-card__header),
-.hub-tabs :deep(.my-booking > .el-card > .el-card__header),
-.hub-tabs :deep(.my-favorite > .el-card > .el-card__header) {
-  padding: 0 0 14px;
-  border-bottom: 1px solid #f0f0f0;
-}
 .embedded-pane {
-  padding: 4px 0;
+  padding-top: 2px;
+}
+
+/* 帖子缩略图统一尺寸与裁切比例，避免忽大忽小 */
+.embedded-pane :deep(.post-cover) {
+  width: 132px;
+  height: 88px;
+  flex-shrink: 0;
+  border-radius: 8px;
+  overflow: hidden;
+  background: #f2f8ff;
+}
+.embedded-pane :deep(.post-cover img) {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  display: block;
 }
 </style>
