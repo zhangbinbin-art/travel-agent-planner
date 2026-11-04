@@ -1,4 +1,5 @@
 from fastapi import APIRouter, Depends, HTTPException, status, Query
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 from core.database import get_db
 from api.deps import get_current_user, require_admin, require_any_auth
@@ -63,5 +64,12 @@ def delete_spot(
     spot = spot_service.get_spot_by_id(db, spot_id)
     if not spot:
         raise HTTPException(status_code=404, detail="景点不存在")
-    spot_service.delete_spot(db, spot)
+    try:
+        spot_service.delete_spot(db, spot)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="该景点存在关联的评论/收藏/路线数据，请先使用 scripts/delete_spot_safe.py 合并或清理后再删除",
+        )
     return {"message": "删除成功"}
