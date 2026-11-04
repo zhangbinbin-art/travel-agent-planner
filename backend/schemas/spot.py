@@ -15,6 +15,7 @@ class SpotBase(BaseModel):
     cover: Optional[str] = None
     address: Optional[str] = None
     heat: Optional[int] = 0
+    images: Optional[str] = None
     # 经纬度（v0.13 新增）：后台按名称一键获取，用于地图标注与真实距离
     lat: Optional[float] = None
     lng: Optional[float] = None
@@ -36,6 +37,7 @@ class SpotUpdate(BaseModel):
     cover: Optional[str] = None
     address: Optional[str] = None
     heat: Optional[int] = None
+    images: Optional[str] = None
     lat: Optional[float] = None
     lng: Optional[float] = None
 

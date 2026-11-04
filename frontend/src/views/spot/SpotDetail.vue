@@ -3,12 +3,18 @@
     <div class="spot-inner">
       <!-- ========== ① 首屏 Hero ========== -->
       <section class="spot-hero">
-        <img
-          v-if="spot.cover"
-          class="hero-cover"
-          :src="spot.cover"
-          :alt="spot.name || '景点封面'"
-        />
+        <el-carousel
+          v-if="heroImages.length"
+          class="hero-carousel"
+          height="100%"
+          :interval="5000"
+          indicator-position="inside"
+          arrow="hover"
+        >
+          <el-carousel-item v-for="(url, idx) in heroImages" :key="idx">
+            <img class="hero-cover" :src="url" :alt="spot.name || '景点封面'" />
+          </el-carousel-item>
+        </el-carousel>
         <div v-else class="hero-placeholder">
           <span class="hero-watermark">{{ spot.theme || '目的地' }}</span>
         </div>
@@ -319,6 +325,22 @@ const spotTrip = ref(null)
 const tripLoading = ref(false)
 
 /* ---------- 计算属性 ---------- */
+// 首屏实景轮播：优先用高德 POI 相册（images），退回封面单图
+const heroImages = computed(() => {
+  const raw = spot.value?.images
+  let list = []
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw)
+      if (Array.isArray(parsed)) list = parsed.filter(Boolean)
+    } catch (e) {
+      list = []
+    }
+  }
+  if (!list.length && spot.value?.cover) list = [spot.value.cover]
+  return list
+})
+
 const tagList = computed(() => {
   const tags = spot.value.tags
   if (Array.isArray(tags)) return tags.filter(Boolean).map((t) => String(t).trim()).filter(Boolean)
@@ -913,6 +935,27 @@ onBeforeUnmount(() => {
   border-radius: 12px;
   overflow: hidden;
   background: #dbe4ee;
+}
+.hero-carousel {
+  width: 100%;
+  height: 100%;
+}
+.hero-carousel :deep(.el-carousel__container) {
+  height: 100% !important;
+}
+.hero-carousel :deep(.el-carousel__indicator) {
+  padding: 6px 4px;
+}
+.hero-carousel :deep(.el-carousel__button) {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.45);
+}
+.hero-carousel :deep(.el-carousel__indicator.is-active .el-carousel__button) {
+  width: 22px;
+  border-radius: 4px;
+  background: #fff;
 }
 .hero-cover {
   display: block;
