@@ -945,6 +945,29 @@ def smart_recommend(db: Session, payload) -> dict:
 
     # 自动推荐酒店：仅从满足筛选条件的同城酒店池中挑选 1 家（环境+服务总分最高）
     hotels = recommend_hotels(db, payload)
+
+    # 距离过滤：离目标城市中心 > 40km 的酒店不参与推荐与地图打点
+    city_center = _CITY_COORDS.get((payload.target_city or "").strip())
+    if city_center is None:
+        coord_spots = [s for s in spots if s.lat is not None and s.lng is not None]
+        if coord_spots:
+            city_center = (
+                sum(float(s.lat) for s in coord_spots) / len(coord_spots),
+                sum(float(s.lng) for s in coord_spots) / len(coord_spots),
+            )
+    if city_center:
+        before_count = len(hotels)
+        hotels = [
+            h
+            for h in hotels
+            if h.get("lat") is not None
+            and h.get("lng") is not None
+            and _haversine_km(city_center[0], city_center[1], float(h["lat"]), float(h["lng"])) <= 40
+        ]
+        print(
+            "[smart_recommend] 酒店距离过滤(<=40km)：%d -> %d 家"
+            % (before_count, len(hotels))
+        )
     auto_hotel = None
     if hotels:
         best = hotels[0]
