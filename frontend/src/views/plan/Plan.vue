@@ -152,36 +152,6 @@
               <div>起点：<span class="highlight">{{ startSpotName }}</span></div>
             </div>
 
-            <el-divider content-position="left">预算预估</el-divider>
-            <div v-if="routeData.budget" class="budget-card">
-              <div class="budget-head">游玩天数：<span class="highlight">{{ routeData.budget.days }}</span> 天</div>
-              <div v-for="item in (routeData.budget.items || [])" :key="item.spot_id" class="budget-row">
-                <span class="budget-name">{{ item.name }}</span>
-                <span>门票 ¥{{ formatMoney(item.ticket_price) }}</span>
-              </div>
-              <el-divider class="budget-divider" />
-              <div class="budget-row">
-                <span>门票合计</span>
-                <span>¥{{ formatMoney(routeData.budget.ticket_total ?? 0) }}</span>
-              </div>
-              <div class="budget-row">
-                <span>食宿费用（{{ routeData.budget.days }} 天 × ¥{{ formatMoney(generatedHotelPerDay ?? hotelPerDay) }}/天）</span>
-                <span>¥{{ formatMoney(routeData.budget.hotel_total ?? 0) }}</span>
-              </div>
-              <div class="budget-row">
-                <span>交通费用（{{ formatDistance(routeData.total_distance) }} km）</span>
-                <span>¥{{ formatMoney(routeData.budget.traffic_total ?? 0) }}</span>
-              </div>
-              <div class="budget-row budget-total">
-                <span>总预算</span>
-                <span class="highlight">¥{{ formatMoney(routeData.budget.grand_total ?? 0) }}</span>
-              </div>
-              <div class="budget-row">
-                <span>日均预算（按 {{ routeData.budget.days }} 天）</span>
-                <span class="highlight">¥{{ formatMoney(routeData.budget.daily_avg ?? 0) }}</span>
-              </div>
-            </div>
-            <div v-else class="budget-empty">暂无预算信息</div>
             <div v-if="routeData.spot_reused" class="reuse-hint">
               ⚠️ 符合偏好景点数量不足，部分日期复用热门景点
             </div>
@@ -216,6 +186,27 @@
                   </div>
                 </div>
               </div>
+            </div>
+
+            <el-divider content-position="left">配套酒店推荐</el-divider>
+            <div class="hotel-recommend">
+              <div v-if="hotelMarkers.length" class="hotel-list">
+                <article
+                  v-for="h in hotelMarkers"
+                  :key="h.id"
+                  class="hotel-item"
+                  @click="goHotelDetail(h.id)"
+                >
+                  <div class="hotel-item-main">
+                    <div class="hotel-item-name">{{ h.name }}</div>
+                    <div class="hotel-item-addr">{{ h.address || '地址信息暂无' }}</div>
+                  </div>
+                  <div class="hotel-item-price">
+                    ¥{{ formatMoney(h.price) }}<span class="unit">/晚</span>
+                  </div>
+                </article>
+              </div>
+              <div v-else class="hotel-empty">暂无配套推荐酒店</div>
             </div>
 
             <el-divider content-position="left">路线图</el-divider>
@@ -510,6 +501,14 @@ const onTimelineClick = (item) => {
   } else {
     router.push(`/hotel-detail/${item.id}`)
   }
+}
+
+// 后端返回的配套酒店（已按 40km 过滤）
+const hotelMarkers = computed(() => routeData.value?.hotel_markers || [])
+
+const goHotelDetail = (id) => {
+  if (!id) return
+  router.push(`/hotel-detail/${id}`)
 }
 
 const extractError = (e, fallback) => {
@@ -1507,39 +1506,6 @@ onBeforeUnmount(() => {
   color: #f06818;
   font-weight: 700;
 }
-.budget-card {
-  border: 1px solid #ebeef5;
-  border-radius: 6px;
-  padding: 12px 14px;
-  background: #fafcff;
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-}
-.budget-head {
-  color: #303133;
-}
-.budget-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 16px;
-  color: #606266;
-}
-.budget-name {
-  color: #303133;
-}
-.budget-divider {
-  margin: 4px 0;
-}
-.budget-total {
-  color: #303133;
-  font-weight: 600;
-}
-.budget-empty {
-  color: #909399;
-  font-size: 13px;
-}
 .reuse-hint {
   margin-top: 10px;
   color: #909399;
@@ -1583,6 +1549,70 @@ onBeforeUnmount(() => {
 }
 .route-timeline {
   padding: 4px 0 4px 4px;
+}
+.hotel-recommend {
+  border: 2px solid #222;
+  border-radius: 10px;
+  background: #fff;
+  padding: 8px;
+}
+.hotel-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+.hotel-item {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px;
+  border: 1px solid rgba(34, 34, 34, 0.14);
+  border-radius: 10px;
+  background: #fff;
+  cursor: pointer;
+  transition: background 0.16s ease, border-color 0.16s ease, transform 0.16s ease;
+}
+.hotel-item:hover {
+  background: #fff7ef;
+  border-color: #222;
+  transform: translateY(-1px);
+}
+.hotel-item-main {
+  min-width: 0;
+}
+.hotel-item-name {
+  font-size: 14px;
+  font-weight: 700;
+  color: #222;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hotel-item-addr {
+  margin-top: 2px;
+  font-size: 12px;
+  color: #7b8794;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.hotel-item-price {
+  flex-shrink: 0;
+  font-size: 14px;
+  font-weight: 800;
+  color: #f06818;
+}
+.hotel-item-price .unit {
+  font-size: 11px;
+  font-weight: 500;
+  color: #7b8794;
+}
+.hotel-empty {
+  padding: 14px 0;
+  text-align: center;
+  font-size: 13px;
+  color: #909399;
 }
 .timeline-row {
   display: flex;
@@ -1744,16 +1774,6 @@ onBeforeUnmount(() => {
 }
 .timeline-dot.hotel {
   background: #4aa3ff;
-}
-.budget-card {
-  background: #fff;
-  border: 2px solid #222;
-  border-radius: 14px;
-  box-shadow: 3px 3px 0 rgba(34, 34, 34, 0.1);
-}
-.budget-row.budget-total {
-  color: #f06818;
-  font-weight: 800;
 }
 .reuse-hint {
   border: 1px dashed rgba(34, 34, 34, 0.18);
@@ -2012,23 +2032,6 @@ onBeforeUnmount(() => {
 }
 .timeline-meta {
   font-size: 13px;
-}
-.budget-card {
-  border-radius: 10px;
-  box-shadow: 0 4px 12px rgba(34, 34, 34, 0.06);
-  min-width: 0;
-}
-.budget-row {
-  display: flex;
-  align-items: baseline;
-  justify-content: space-between;
-  gap: 10px;
-  font-size: 14px;
-}
-.budget-row > span:last-child {
-  text-align: right;
-  white-space: nowrap;
-  font-variant-numeric: tabular-nums;
 }
 
 /* ================= 地图 / 图表防溢出 ================= */
