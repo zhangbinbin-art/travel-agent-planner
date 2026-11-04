@@ -824,24 +824,40 @@ def smart_recommend(db: Session, payload) -> dict:
     # 每日景点数量：1~4，越界钳位
     safe_per_day = max(1, min(int(getattr(payload, "per_day", 3) or 3), 4))
     need = safe_days * safe_per_day
-    if len(spots) < need:
-        raise ValueError("景点资源不足，无法生成路线")
+    total_spots = len(spots)
+    # 资源不足时自动降级：需求数钳到实际可用景点数，不报错、也不复用同一景点
+    degraded = total_spots < need
+    effective_need = min(need, total_spots)
+    if degraded:
+        print(
+            "[smart_recommend] 景点资源不足，自动降级：需求=%d 实际可用=%d 城市=%s"
+            % (need, total_spots, payload.target_city)
+        )
 
     # ① 偏好优先池：命中任一偏好的景点
     preferred = [s for _, s in scored if _pref_hit(s, payload.preferences) == 1]
     # ② 其余景点作为补充池
     rest = [s for _, s in scored if _pref_hit(s, payload.preferences) == 0]
 
-    if len(preferred) >= need:
-        spot_pool = preferred[:need]
+    if len(preferred) >= effective_need:
+        spot_pool = preferred[:effective_need]
         extra_count = 0
     else:
-        spot_pool = preferred + rest[: need - len(preferred)]
-        extra_count = need - len(preferred)
+        spot_pool = preferred + rest[: effective_need - len(preferred)]
+        extra_count = effective_need - len(preferred)
 
     print(
-        "[smart_recommend] 城市=%s 天数=%d 每日=%d 需求=%d 优先池=%d 补充=%d 候选=%d"
-        % (payload.target_city, safe_days, safe_per_day, need, len(preferred), extra_count, len(spot_pool))
+        "[smart_recommend] 城市=%s 天数=%d 每日=%d 需求=%d 可用=%d 优先池=%d 补充=%d 候选=%d"
+        % (
+            payload.target_city,
+            safe_days,
+            safe_per_day,
+            need,
+            total_spots,
+            len(preferred),
+            extra_count,
+            len(spot_pool),
+        )
     )
     if not spot_pool:
         raise ValueError("没有符合偏好的景点")
@@ -857,12 +873,12 @@ def smart_recommend(db: Session, payload) -> dict:
             allocations.append(spot_pool[cursor : cursor + count])
             cursor += count
     else:
+        # 景点不足以覆盖每一天时：一天一个，剩余天数留空（不复用同一景点）
         for day_idx in range(safe_days):
             if day_idx < len(spot_pool):
                 allocations.append([spot_pool[day_idx]])
             else:
-                allocations.append([spot_pool[0]])
-                reused = True
+                allocations.append([])
 
     ordered_route = []
     day_plans = []
