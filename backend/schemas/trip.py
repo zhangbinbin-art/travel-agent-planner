@@ -12,6 +12,8 @@ class SmartRecommendRequest(BaseModel):
     travel_type: str = Field("单人出行")
     preferences: List[str] = Field(default_factory=list)
     days: int = Field(1, ge=1, le=10)
+    # 每日游玩景点数量(1~4)，越界由服务层自动钳位
+    per_day: int = 3
     hotel_per_day: Optional[float] = Field(None, ge=0, le=100000)
     # 酒店筛选条件（可选，用于推荐同城酒店）
     hotel_types: List[str] = Field(default_factory=list)

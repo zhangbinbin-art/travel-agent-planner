@@ -147,6 +147,7 @@ def get_distance(spot_a: Spot, spot_b: Spot) -> float:
             return _AMAP_CACHE[key]
 
     distance = None
+    # 扩展方案：配置AMAP_KEY后可切换高德真实驾车距离矩阵，受接口配额限制，毕设暂不启用
     # 只有配置了密钥且两个景点都有真实经纬度时才尝试调用高德
     if (
         settings.AMAP_KEY
@@ -704,6 +705,48 @@ def _order_day(group, start_spot):
     return order
 
 
+def _pref_hit(spot, preferences) -> int:
+    """是否命中任一游玩偏好（1/0）。"""
+    for pref in set(preferences or []):
+        if _matches_preference(spot, pref):
+            return 1
+    return 0
+
+
+def _order_day_weighted(group, start_spot, preferences):
+    """偏好+距离加权贪心：score = 偏好分*0.6 + 归一化距离分*0.4。
+
+    距离分在「当前剩余候选」中做 min-max 归一化，越近越接近 1；
+    同分时按欧氏距离升序（更近优先）。
+    """
+    remaining = list(group)
+    if not remaining:
+        return []
+    order = []
+    current = start_spot if start_spot in remaining else remaining[0]
+    remaining.remove(current)
+    order.append(current)
+
+    while remaining:
+        distances = {s.id: get_distance(current, s) for s in remaining}
+        lo, hi = min(distances.values()), max(distances.values())
+        span = hi - lo
+
+        def rank(spot):
+            pref = _pref_hit(spot, preferences)
+            dist = distances[spot.id]
+            norm = 1.0 if span <= 1e-9 else (hi - dist) / span
+            score = round(pref * 0.6 + norm * 0.4, 4)
+            # 分数高优先；同分距离近优先；再按 id 稳定排序
+            return (-score, dist, spot.id)
+
+        next_spot = min(remaining, key=rank)
+        remaining.remove(next_spot)
+        order.append(next_spot)
+        current = next_spot
+    return order
+
+
 def recommend_hotels(db: Session, payload) -> list:
     query = db.query(Hotel).filter(Hotel.status == "on_shelf")
     # 单目的地：优先按地址包含城市名匹配；匹配不到时按坐标距离兜底（≤100km）
@@ -778,8 +821,28 @@ def smart_recommend(db: Session, payload) -> dict:
     scored.sort(key=lambda item: (-item[0], -(float(getattr(item[1], "score", 0) or 0)), item[1].id))
 
     safe_days = max(1, min(int(payload.days or 1), 10))
-    # 候选池：按评分降序，最多取 days*3（单日上限 3 个）
-    spot_pool = [s for _, s in scored[: safe_days * 3]]
+    # 每日景点数量：1~4，越界钳位
+    safe_per_day = max(1, min(int(getattr(payload, "per_day", 3) or 3), 4))
+    need = safe_days * safe_per_day
+    if len(spots) < need:
+        raise ValueError("景点资源不足，无法生成路线")
+
+    # ① 偏好优先池：命中任一偏好的景点
+    preferred = [s for _, s in scored if _pref_hit(s, payload.preferences) == 1]
+    # ② 其余景点作为补充池
+    rest = [s for _, s in scored if _pref_hit(s, payload.preferences) == 0]
+
+    if len(preferred) >= need:
+        spot_pool = preferred[:need]
+        extra_count = 0
+    else:
+        spot_pool = preferred + rest[: need - len(preferred)]
+        extra_count = need - len(preferred)
+
+    print(
+        "[smart_recommend] 城市=%s 天数=%d 每日=%d 需求=%d 优先池=%d 补充=%d 候选=%d"
+        % (payload.target_city, safe_days, safe_per_day, need, len(preferred), extra_count, len(spot_pool))
+    )
     if not spot_pool:
         raise ValueError("没有符合偏好的景点")
 
@@ -818,7 +881,11 @@ def smart_recommend(db: Session, payload) -> dict:
                     best, best_dist = spot, dist
             if best is not None:
                 start_spot = best
-        day_order = _order_day(group, start_spot)
+        day_order = _order_day_weighted(group, start_spot, payload.preferences)
+        print(
+            "[smart_recommend] 第%d天顺序: %s"
+            % (idx + 1, " -> ".join("%s(偏好%s)" % (s.name, _pref_hit(s, payload.preferences)) for s in day_order))
+        )
         # route 只保留唯一景点（复用景点不重复计入路线与预算）
         for spot in day_order:
             if spot.id not in seen_spot_ids:

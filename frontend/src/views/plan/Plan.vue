@@ -74,6 +74,12 @@
               <el-input-number v-model="days" :min="1" :max="10" />
             </div>
 
+            <div class="form-block days-section">
+              <div class="section-label">每日景点数量</div>
+              <el-input-number v-model="perDay" :min="1" :max="4" :step="1" />
+            </div>
+            <div class="field-hint">每天规划 1~4 个景点</div>
+
             <div class="hotel-block">
               <div class="panel-title">酒店预订（可选）</div>
 
@@ -315,6 +321,8 @@ const targetCity = ref('')
 const travelType = ref('单人出行')
 const preferences = ref([])
 const days = ref(2)
+// 每日游玩景点数量（1~4）
+const perDay = ref(3)
 
 const defaultHotelFilters = () => ({
   types: [],
@@ -624,6 +632,7 @@ const savePlanCache = () => {
       travelType: travelType.value,
       preferences: preferences.value,
       days: days.value,
+      per_day: Number(perDay.value) || 3,
       hotelFilters: hotelFilters.value,
       hotelPerDay: hotelPerDay.value,
       selectedHotelId: selectedHotelId.value,
@@ -660,6 +669,7 @@ const restorePlanCache = () => {
       ...hotelFilters.value,
       _ts: Date.now()
     }
+    perDay.value = Number(data.perDay) >= 1 && Number(data.perDay) <= 4 ? Number(data.perDay) : 3
     hotelPerDay.value = data.hotelPerDay ?? 300
     selectedHotelId.value = data.selectedHotelId ?? ''
     selectedHotel.value = data.selectedHotel || null
@@ -693,6 +703,10 @@ const handleRegenerate = async () => {
 }
 
 const handleGenerate = async () => {
+  if (!(Number(perDay.value) >= 1 && Number(perDay.value) <= 4)) {
+    ElMessage.warning('每日景点数量需在 1~4 之间')
+    return
+  }
   if (!targetCity.value || !targetCity.value.trim()) {
     ElMessage.warning('请输入目标地区（单城市）')
     return
@@ -713,6 +727,7 @@ const handleGenerate = async () => {
       travel_type: travelType.value,
       preferences: preferences.value,
       days: days.value,
+      per_day: perDay.value,
       hotel_per_day: null,
       ...buildHotelFilterPayload()
     })
@@ -757,6 +772,7 @@ const resetAll = (clearCache = false) => {
   hotelFilterSeed.value = null
   hotelResetSignal.value += 1
   hotelPerDay.value = 300
+  perDay.value = 3
   selectedHotelId.value = ''
   selectedHotel.value = null
   autoHotelApplied.value = false
@@ -1896,6 +1912,11 @@ onBeforeUnmount(() => {
 }
 .days-section :deep(.el-input-number) {
   width: 110px;
+}
+.field-hint {
+  margin: -8px 0 14px;
+  font-size: 12px;
+  color: #909399;
 }
 
 /* ================= 酒店预订板块 ================= */
