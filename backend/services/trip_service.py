@@ -689,23 +689,6 @@ def _departure_distance(lat, lng, spot) -> Optional[float]:
         return None
 
 
-def _order_day(group, start_spot):
-    """贪心最近邻排序，减少折返；day1 可从离出发位置最近的景点开始。"""
-    remaining = [spot for spot in group]
-    if not remaining:
-        return []
-    order = []
-    current = start_spot if start_spot in remaining else remaining[0]
-    remaining.remove(current)
-    order.append(current)
-    while remaining:
-        next_spot = min(remaining, key=lambda s: (get_distance(current, s), s.id))
-        remaining.remove(next_spot)
-        order.append(next_spot)
-        current = next_spot
-    return order, truncated
-
-
 def _pref_hit(spot, preferences) -> int:
     """是否命中任一游玩偏好（1/0）。"""
     for pref in set(preferences or []):
