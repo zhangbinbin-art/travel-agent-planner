@@ -681,6 +681,7 @@ def _departure_distance(lat, lng, spot) -> Optional[float]:
     if lat is None or lng is None:
         return None
     if not (settings.AMAP_KEY and spot.lat is not None and spot.lng is not None):
+        # 无密钥时保持原行为：不按出发地挑首站，避免首站落在城市远郊导致后续候选被过滤光
         return None
     try:
         return _fetch_amap_distance((lng, lat), (spot.lng, spot.lat))
@@ -702,7 +703,7 @@ def _order_day(group, start_spot):
         remaining.remove(next_spot)
         order.append(next_spot)
         current = next_spot
-    return order
+    return order, truncated
 
 
 def _pref_hit(spot, preferences) -> int:
@@ -713,22 +714,124 @@ def _pref_hit(spot, preferences) -> int:
     return 0
 
 
-def _order_day_weighted(group, start_spot, preferences):
+CLUSTER_DISTANCE_FACTOR = 1.8
+# 阈值下限：集群越密集，平均距离越小，若不加下限会把同城 5~10km 的景点也当孤立点剔除
+CLUSTER_MIN_RADIUS_KM = 15.0  # 动态阈值系数（集群平均两两距离 × 1.8）
+
+
+def _spot_geo(spot):
+    """返回景点真实经纬度 (lng, lat)；缺失则返回 None。"""
+    if spot.lng is None or spot.lat is None:
+        return None
+    return (float(spot.lng), float(spot.lat))
+
+
+def _spot_haversine(a, b) -> float:
+    """两点真实球面距离（km）；任一缺真实坐标时回退到 get_distance 模拟距离。
+
+    打分与集群过滤统一使用真实经纬度，避免两套坐标系相互矛盾导致绕路。
+    """
+    ga, gb = _spot_geo(a), _spot_geo(b)
+    if ga is None or gb is None:
+        return get_distance(a, b)
+    return _haversine_km(ga[1], ga[0], gb[1], gb[0])
+
+
+def _cluster_stats(selected):
+    """返回（集群中心 lng/lat，两两平均距离 km），使用真实经纬度 + 球面距离。
+
+    集群里任一点缺少真实坐标时返回 None（此时不做距离限制）。
+    """
+    coords = [_spot_geo(s) for s in selected]
+    if any(c is None for c in coords):
+        return None
+    cx = sum(c[0] for c in coords) / len(coords)
+    cy = sum(c[1] for c in coords) / len(coords)
+    pair_dists = []
+    for i in range(len(coords)):
+        for j in range(i + 1, len(coords)):
+            pair_dists.append(_haversine_km(coords[i][1], coords[i][0], coords[j][1], coords[j][0]))
+    avg = sum(pair_dists) / len(pair_dists) if pair_dists else 0.0
+    return (cx, cy), avg
+
+
+def _filter_far_spots(remaining, selected, anchor=None):
+    """集群距离过滤：剔除离集群中心 > 动态阈值（平均两两距离 × 1.8）的孤立候选。
+
+    返回 (保留候选, 被剔除候选, 调试信息)。景点数 ≤2 或坐标缺失时不做限制。
+    """
+    if len(selected) <= 2 or not remaining:
+        return remaining, [], None
+    stats = _cluster_stats(selected)
+    if not stats:
+        return remaining, [], None
+    (cx, cy), avg_dist = stats
+    # 锚点用「上一个已选景点」，避免集群均值被远端点拉偏导致来回折返
+    anchor_geo = _spot_geo(anchor) if anchor is not None else None
+    if anchor_geo is not None:
+        cx, cy = anchor_geo
+    threshold = max(avg_dist * CLUSTER_DISTANCE_FACTOR, CLUSTER_MIN_RADIUS_KM)
+    if threshold <= 0:
+        return remaining, [], None
+    kept, dropped = [], []
+    for spot in remaining:
+        geo = _spot_geo(spot)
+        if geo is None:
+            kept.append(spot)  # 无坐标的候选不参与距离限制
+            continue
+        dist = _haversine_km(cy, cx, geo[1], geo[0])
+        if dist <= threshold:
+            kept.append(spot)
+        else:
+            dropped.append(spot)
+    info = {
+        "center": (round(cx, 6), round(cy, 6)),
+        "avg_distance": round(avg_dist, 2),
+        "threshold": round(threshold, 2),
+        "dropped": [s.name for s in dropped],
+    }
+    return kept, dropped, info
+
+
+def _order_day_weighted(group, start_spot, preferences, limit=None):
     """偏好+距离加权贪心：score = 偏好分*0.6 + 归一化距离分*0.4。
 
-    距离分在「当前剩余候选」中做 min-max 归一化，越近越接近 1；
+    每一步先在「已选集群」基础上做距离阈值过滤，再对剩余候选打分；
+    若过滤后为空则停止选点（不放开阈值强塞远点），返回已选景点并标记 truncated。
+    距离分在「当前候选」中做 min-max 归一化，越近越接近 1；
     同分时按欧氏距离升序（更近优先）。
     """
     remaining = list(group)
     if not remaining:
-        return []
+        return [], False
+    truncated = False
     order = []
     current = start_spot if start_spot in remaining else remaining[0]
     remaining.remove(current)
     order.append(current)
 
-    while remaining:
-        distances = {s.id: get_distance(current, s) for s in remaining}
+    while remaining and (limit is None or len(order) < limit):
+        # ① 集群距离过滤（动态阈值）
+        kept, dropped, info = _filter_far_spots(remaining, order, anchor=current)
+        if info and dropped:
+            print(
+                "[cluster] 中心=%s 平均距离=%.2f 阈值=%.2f 剔除=%s"
+                % (info["center"], info["avg_distance"], info["threshold"], ",".join(info["dropped"])),
+                flush=True,
+            )
+        if not kept and dropped:
+            # 新兜底：不再放开限制强塞远点，直接停止选点
+            print(
+                "[cluster] 候选池过滤后为空，停止选点，最终景点不足需求数量（已选 %d 个）"
+                % len(order),
+                flush=True,
+            )
+            truncated = True
+            break
+        candidates = kept
+
+        # ② 加权打分（偏好 0.6 + 归一化距离 0.4）
+        distances = {s.id: _spot_haversine(current, s) for s in candidates}
         lo, hi = min(distances.values()), max(distances.values())
         span = hi - lo
 
@@ -740,11 +843,16 @@ def _order_day_weighted(group, start_spot, preferences):
             # 分数高优先；同分距离近优先；再按 id 稳定排序
             return (-score, dist, spot.id)
 
-        next_spot = min(remaining, key=rank)
+        next_spot = min(candidates, key=rank)
+        print(
+            "[greedy] 选中=%-12s 到上一站=%.2fkm 票价=%s"
+            % (next_spot.name, distances[next_spot.id], float(getattr(next_spot, "price", 0) or 0)),
+            flush=True,
+        )
         remaining.remove(next_spot)
         order.append(next_spot)
         current = next_spot
-    return order
+    return order, truncated
 
 
 def recommend_hotels(db: Session, payload) -> list:
@@ -839,12 +947,15 @@ def smart_recommend(db: Session, payload) -> dict:
     # ② 其余景点作为补充池
     rest = [s for _, s in scored if _pref_hit(s, payload.preferences) == 0]
 
-    if len(preferred) >= effective_need:
-        spot_pool = preferred[:effective_need]
+    # 候选池只取偏好命中景点（宁缺毋滥）；偏好全不命中时才回退到全部景点
+    # 额外多留 8 个备选，供集群距离过滤替换远景点
+    CANDIDATE_BUFFER = 8
+    if preferred:
+        spot_pool = preferred[: effective_need + CANDIDATE_BUFFER]
         extra_count = 0
     else:
-        spot_pool = preferred + rest[: effective_need - len(preferred)]
-        extra_count = effective_need - len(preferred)
+        spot_pool = rest[: effective_need + CANDIDATE_BUFFER]
+        extra_count = len(spot_pool)
 
     print(
         "[smart_recommend] 城市=%s 天数=%d 每日=%d 需求=%d 可用=%d 优先池=%d 补充=%d 候选=%d"
@@ -862,56 +973,42 @@ def smart_recommend(db: Session, payload) -> dict:
     if not spot_pool:
         raise ValueError("没有符合偏好的景点")
 
-    # 景点按天均分：每天尽量平均，优先保证每天至少 1 个；不足时复用最高分景点
-    reused = False
-    allocations = []
-    if len(spot_pool) >= safe_days:
-        base, rem = divmod(len(spot_pool), safe_days)
-        cursor = 0
-        for day_idx in range(safe_days):
-            count = base + (1 if day_idx < rem else 0)
-            allocations.append(spot_pool[cursor : cursor + count])
-            cursor += count
-    else:
-        # 景点不足以覆盖每一天时：一天一个，剩余天数留空（不复用同一景点）
-        for day_idx in range(safe_days):
-            if day_idx < len(spot_pool):
-                allocations.append([spot_pool[day_idx]])
-            else:
-                allocations.append([])
+    # 起点：从候选池里挑离出发位置最近的景点作为第一站
+    start_spot = spot_pool[0]
+    best_dist = None
+    for spot in spot_pool:
+        dist = _departure_distance(payload.start_lat, payload.start_lng, spot)
+        if dist is not None and (best_dist is None or dist < best_dist):
+            start_spot, best_dist = spot, dist
 
-    ordered_route = []
+    # 全局加权贪心（含集群距离过滤），再按「每日景点数量」切分到每天
+    ordered_route, truncated = _order_day_weighted(
+        spot_pool, start_spot, payload.preferences, limit=effective_need
+    )
+    tips = None
+    if truncated or len(ordered_route) < effective_need:
+        tips = "因距离过滤限制，本次路线景点数量少于设置值，优先保证景点地理连续集中"
+        print(
+            "[smart_recommend] 路线景点不足：需要 %d 实际 %d（已停止追加远距离景点）"
+            % (effective_need, len(ordered_route)),
+            flush=True,
+        )
+    allocations = [
+        ordered_route[i : i + safe_per_day]
+        for i in range(0, len(ordered_route), safe_per_day)
+    ]
+
+    # 自动降级后不再复用景点，保持字段兼容
+    reused = False
     day_plans = []
-    seen_spot_ids = set()
     for idx, group in enumerate(allocations):
         if not group:
             continue
-        start_spot = group[0]
-        if idx == 0:
-            # 第一天从离出发位置最近的景点开始
-            best = None
-            best_dist = None
-            for spot in group:
-                dist = _departure_distance(payload.start_lat, payload.start_lng, spot)
-                if dist is not None and (best_dist is None or dist < best_dist):
-                    best, best_dist = spot, dist
-            if best is not None:
-                start_spot = best
-        day_order = _order_day_weighted(group, start_spot, payload.preferences)
-        print(
-            "[smart_recommend] 第%d天顺序: %s"
-            % (idx + 1, " -> ".join("%s(偏好%s)" % (s.name, _pref_hit(s, payload.preferences)) for s in day_order))
-        )
-        # route 只保留唯一景点（复用景点不重复计入路线与预算）
-        for spot in day_order:
-            if spot.id not in seen_spot_ids:
-                seen_spot_ids.add(spot.id)
-                ordered_route.append(spot)
         day_plans.append(
             {
                 "day": idx + 1,
-                "spot_ids": [s.id for s in day_order],
-                "spot_names": [s.name for s in day_order],
+                "spot_ids": [s.id for s in group],
+                "spot_names": [s.name for s in group],
             }
         )
 
@@ -1039,9 +1136,16 @@ def smart_recommend(db: Session, payload) -> dict:
     # 说明：两者都只做可视化，里程与预算仍由后端 Haversine/模拟距离计算。
     # ------------------------------------------------------------------
     route_list = [
-        {"id": item.id, "name": item.name, "lng": item.lng, "lat": item.lat, "type": "spot"}
-        for item in route
-        if item.lng is not None and item.lat is not None
+        {
+            "id": spot.id,
+            "name": spot.name,
+            "lng": spot.lng,
+            "lat": spot.lat,
+            "price": float(spot.price or 0),
+            "type": "spot",
+        }
+        for spot in ordered_route
+        if spot.lng is not None and spot.lat is not None
     ]
     hotel_markers = []
     seen_hotel_ids = set()
@@ -1089,6 +1193,7 @@ def smart_recommend(db: Session, payload) -> dict:
         "start_location": payload.start_location,
         "start_lat": payload.start_lat,
         "start_lng": payload.start_lng,
+        "tips": tips,
     }
 
 # 常用城市坐标（用于无高德 Key 时估算 出发地 -> 目的地 距离）

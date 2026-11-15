@@ -64,6 +64,8 @@ class SmartRecommendResponse(BaseModel):
     # 出发位置经纬度（v0.13 新增，仅供前端地图标记起点）
     start_lat: Optional[float] = None
     start_lng: Optional[float] = None
+    # 调试提示（前端不渲染）：距离过滤导致景点数量不足时给出说明
+    tips: Optional[str] = None
     # 出发地 -> 第一个景点的距离（km），已并入 total_distance
     departure_distance: Optional[float] = None
 

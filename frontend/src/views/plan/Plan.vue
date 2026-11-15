@@ -181,7 +181,9 @@
                     </template>
                   </div>
                   <div class="timeline-meta">
-                    <template v-if="item.kind === 'spot'">评分：{{ item.score }} ｜ </template>
+                    <template v-if="item.kind === 'spot'">
+                      评分：{{ item.score }} ｜ 票价：{{ Number(item.price) > 0 ? item.price + '元' : '免费' }} ｜
+                    </template>
                     第{{ item.day }}天
                   </div>
                 </div>
@@ -442,6 +444,15 @@ const hotelCity = (hotel) => {
 }
 
 // 路线顺序时间轴：优先使用后端 nodes 顺序（景点/酒店穿插），酒店节点使用当前选中酒店
+// route_list 里带 price（免费景点为 0）
+const routePriceMap = computed(() => {
+  const map = {}
+  ;(routeData.value?.route_list || []).forEach((item) => {
+    map[item.id] = Number(item.price) || 0
+  })
+  return map
+})
+
 const timelineItems = computed(() => {
   if (!routeData.value) return []
   const route = routeData.value.route || []
@@ -460,6 +471,7 @@ const timelineItems = computed(() => {
       name: node.name || spot?.name,
       city: spot?.city || '',
       score: node.score ?? spot?.score,
+      price: routePriceMap.value[node.id] ?? 0,
       day: node.day || 1,
       no: spotNo
     })
