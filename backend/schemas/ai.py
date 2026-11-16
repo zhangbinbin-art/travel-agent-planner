@@ -7,7 +7,7 @@
   前端可直接把 params 赋给表单后调用现有 /api/v1/trip/smart-recommend。
 """
 from pydantic import BaseModel, Field
-from typing import Optional, List
+from typing import Any, Dict, Optional, List
 
 
 class AIPlanRequest(BaseModel):
@@ -60,3 +60,33 @@ class AIExplainResponse(BaseModel):
     ok: bool
     degraded: bool
     note: Optional[str] = None
+
+
+class AgentPlanRequest(BaseModel):
+    """Agent 对话请求：message 必填，session_id 用于多轮记忆。"""
+    message: str = Field(..., description="用户当前这句话")
+    session_id: Optional[str] = Field(None, description="会话 ID，首次为空由后端生成")
+
+
+class AgentTraceItem(BaseModel):
+    """一次工具调用记录，便于调试与答辩演示。"""
+    step: int
+    tool: str
+    args: Dict[str, Any] = Field(default_factory=dict)
+    ok: bool = True
+    summary: Optional[str] = None
+
+
+class AgentPlanResponse(BaseModel):
+    """Agent 结果：reply 为最终答复，route 为最后一次路线生成结果。"""
+    session_id: str
+    reply: str
+    route: Optional[Dict[str, Any]] = None
+    params: Dict[str, Any] = Field(default_factory=dict)
+    trace: List[AgentTraceItem] = Field(default_factory=list)
+    degraded: bool = False
+    steps: int = 0
+
+
+class AgentResetRequest(BaseModel):
+    session_id: str

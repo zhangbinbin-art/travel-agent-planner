@@ -14,8 +14,11 @@ from schemas.ai import (
     AIExplainResponse,
     AIPlanRequest,
     AIPlanResponse,
+    AgentPlanRequest,
+    AgentPlanResponse,
+    AgentResetRequest,
 )
-from services import ai_agent
+from services import agent_runner, ai_agent
 
 router = APIRouter()
 
@@ -52,3 +55,38 @@ def explain(
         # 解说失败同样降级，不抛 500
         print("[ai] explain 接口异常，返回兜底结果=%s" % exc, flush=True)
         return ai_agent.default_explain_response()
+
+
+@router.post("/agent/plan", response_model=AgentPlanResponse)
+def agent_plan(
+    payload: AgentPlanRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """多步 Agent：模型可先查景点再生成路线，工具结果自动回填。"""
+    if not (payload.message or "").strip():
+        raise HTTPException(status_code=400, detail="请输入需求描述")
+    try:
+        return agent_runner.run(db, payload.message, payload.session_id)
+    except Exception as exc:
+        print("[ai] agent 接口异常，返回兜底结果=%s" % exc, flush=True)
+        fallback = ai_agent.plan_from_message(db, payload.message)
+        return {
+            "session_id": payload.session_id or "fallback",
+            "reply": fallback.get("reply") or "AI 服务暂时不可用，请手动生成行程",
+            "route": None,
+            "params": fallback.get("params") or {},
+            "trace": [],
+            "degraded": True,
+            "steps": 0,
+        }
+
+
+@router.post("/agent/reset")
+def agent_reset(
+    payload: AgentResetRequest,
+    current_user: User = Depends(get_current_user),
+):
+    """清空指定会话的上下文记忆。"""
+    agent_runner.reset(payload.session_id)
+    return {"ok": True, "session_id": payload.session_id}
