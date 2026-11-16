@@ -361,6 +361,28 @@ def tool_critique_route(db: Session, spot_names: List[str], city: str = "",
     return result
 
 
+def tool_search_knowledge(query: str, city: str = None, top_k: int = 4,
+                          threshold: float = 0.30, db: Session = None) -> dict:
+    """检索景点知识库（简介/点评片段），用于回答特色、口碑、适合人群等非结构化问题。
+
+    只读、无副作用；索引缺失时返回 error 让模型退回普通回答。
+    """
+    from services.rag import index_exists, search as rag_search
+
+    query = (query or "").strip()
+    if not query:
+        return {"error": "query 不能为空", "degraded": True}
+    if not index_exists():
+        return {"error": "知识库未构建，请先运行 scripts/build_rag_index.py", "degraded": True}
+    try:
+        result = rag_search(query, city=city, top_k=int(top_k or 4), threshold=float(threshold or 0.30))
+    except Exception as exc:
+        return {"error": "知识库检索失败：%s" % exc, "degraded": True}
+    if not result.get("count"):
+        result["note"] = result.get("note") or "知识库未检索到相关片段，请如实告知用户未收录"
+    return result
+
+
 def tool_search_hotels(db: Session, city: str, max_price: float = None,
                        near_spot: str = None, radius_km: float = 5,
                        limit: int = HOTEL_LIMIT) -> dict:
@@ -524,6 +546,22 @@ AGENT_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "search_knowledge",
+            "description": "检索景点知识库（简介/点评片段）。用户询问景点特色、适合人群、口碑评价、室内或雨天推荐时先调用本工具；回答必须注明来源景点，检索为空要说未收录，不要整段复制片段。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "检索问题或关键词"},
+                    "city": {"type": "string", "description": "限定城市，可空"},
+                    "top_k": {"type": "integer", "description": "返回条数，默认 4"},
+                },
+                "required": ["query"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_hotels",
             "description": "查询某城市在架酒店，可限制每晚最高价，也可按「距某景点 radius_km 内」过滤。",
             "parameters": {
@@ -540,7 +578,7 @@ AGENT_TOOLS = [
     },
 ]
 
-TOOL_NAMES = {"search_spots", "make_route", "search_hotels", "critique_route"}
+TOOL_NAMES = {"search_spots", "make_route", "search_hotels", "critique_route", "search_knowledge"}
 
 
 def execute_tool(name: str, args: dict, db: Session,
@@ -561,6 +599,8 @@ def execute_tool(name: str, args: dict, db: Session,
             return tool_make_route(db, **args)
         if name == "critique_route":
             return tool_critique_route(db, **args)
+        if name == "search_knowledge":
+            return tool_search_knowledge(db=db, **args)
         return tool_search_hotels(db, **args)
     except TypeError as exc:
         return {"error": "参数不合法：%s" % exc, "degraded": True}

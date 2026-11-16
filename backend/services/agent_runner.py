@@ -58,6 +58,9 @@ AGENT_SYSTEM_PROMPT = (
     "17) 不要用「完全符合」这类绝对化表述，如有未命中偏好的景点必须点名说明；"
     "18) 偏好只能来自用户明确表达：用户没提的偏好不得自行加入 preferences / main / secondary，"
     "否则自检会把「自行添加的偏好」当成合规依据，掩盖真实缺口；"
+    "20) 用户询问景点特色、适合人群（带娃/老人/情侣）、口碑评价、室内或雨天推荐等非结构化问题时，"
+    "必须先调用 search_knowledge；回答要转述具体内容并注明来源景点，不得编造；"
+    "检索为空要明确说「知识库未收录」，不要用常识补；不要把片段整段复制，控制在 150 字内。"
     "19) 若 make_route 返回的 day_plans 数量少于用户要求的天数（说明后面几天没排到景点），"
     "不要直接交付：先降低 per_day 再排一次（例如 3 天原本 per_day=3，可改为 2），"
     "目标是让每天都有景点；若降低到 1 仍排不满，才如实说明「第X天没有可排景点，页面只显示前几天」并给出建议。"
@@ -90,7 +93,8 @@ CONFLICT_RULES = [
     },
     {
         "code": "low_budget_park",
-        "match": lambda c: c["low_budget"] and "游乐乐园" in c["preferences"],
+        "match": lambda c: c["low_budget"] and (
+            "游乐乐园" in c["preferences"] or any(k in c["text"] for k in ("乐园", "长隆", "游乐园"))),
         "message": "预算偏低但选择了游乐乐园（热门乐园门票通常较高），是否放宽预算或替换为免费公园？",
     },
     {
@@ -213,6 +217,13 @@ def _fact_from_tool(name: str, args: dict, result: dict, trace_id: Optional[str]
             result.get("score"), result.get("ok"),
             json.dumps(result.get("score_breakdown"), ensure_ascii=False),
             "；".join(texts) or "无",
+        )
+    if name == "search_knowledge":
+        hits = "、".join(
+            "%s(%.2f)" % (h.get("spot"), h.get("score") or 0) for h in (result.get("hits") or [])[:4]
+        )
+        return "知识库检索 query=%s：命中 %s 条：%s；note=%s" % (
+            result.get("query"), result.get("count"), hits or "无", result.get("note") or "无"
         )
     if name == "search_hotels":
         hotels = "、".join(
