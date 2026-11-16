@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from core.config import settings
 from services import ai_agent, agent_tools
 
-MAX_STEPS = 5
+MAX_STEPS = 8
 # 单次会话保留的消息条数（含 tool 消息），防止上下文无限增长
 MAX_HISTORY = 20
 # tool 结果回填时的字符上限
@@ -40,6 +40,9 @@ AGENT_SYSTEM_PROMPT = (
     "也不得声称自己“编造了数据”；"
     "11) 当前算法不支持「按天设置不同偏好」；当用户要求逐日不同主题时，"
     "必须明确说明该限制，并提出可行替代（整体偏好或拆成多条路线），不要静默给出不符的路线；"
+    "13) 每次 make_route 之后必须调用 critique_route 自检（传入路线里的景点名、偏好、天数、每日数量）；"
+    "若 issues 里有可修复项（不符合偏好、跨区跳跃、数量不足），最多重排一次 make_route，"
+    "然后如实告知用户自检结果；ok=true 时不必重排，但在总结里说明已通过自检；"
     "12) 用户要求「酒店离景点近 / N 公里内」但没指定圆心时，不要反问："
     "若已有路线，直接用路线第一个景点作圆心；若还没有路线，先 make_route 再用其首站作圆心；"
     "调用 search_hotels 时传 near_spot + radius_km（默认 5），回复中必须写明所用圆心与半径。"
@@ -89,6 +92,12 @@ def _fact_from_tool(name: str, args: dict, result: dict) -> str:
         )
         return "生成路线 days=%s：%s；分组：%s；总里程=%s km；tips=%s" % (
             args.get("days"), route or "无", days or "无", result.get("total_distance"), result.get("tips")
+        )
+    if name == "critique_route":
+        return "自检结果 score=%s ok=%s 通过偏好=%s/%s；issues=%s；suggestions=%s" % (
+            result.get("score"), result.get("ok"), result.get("preference_hits"),
+            result.get("spot_count"), "；".join(result.get("issues") or []) or "无",
+            "；".join(result.get("suggestions") or []) or "无",
         )
     if name == "search_hotels":
         hotels = "、".join(

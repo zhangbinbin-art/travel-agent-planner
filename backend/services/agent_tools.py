@@ -161,6 +161,82 @@ def tool_search_hotels(db: Session, city: str, max_price: float = None,
     return payload
 
 
+def tool_critique_route(db: Session, spot_names: List[str], city: str = "",
+                        preferences: List[str] = None, days: int = None,
+                        per_day: int = None) -> dict:
+    """对已生成的路线做规则自检：景点真实性、偏好覆盖、数量、跨区跳跃。
+
+    只读检查，不改数据库、不重排路线；返回 issues/suggestions 供模型决定是否重排。
+    """
+    names = [str(n).strip() for n in (spot_names or []) if str(n or "").strip()]
+    if not names:
+        return {"error": "需要传入待检查的景点名列表"}
+
+    query = db.query(Spot).filter(Spot.name.in_(names))
+    if city:
+        query = query.filter(Spot.city == city)
+    found = {s.name: s for s in query.all()}
+
+    prefs = [p for p in (preferences or []) if isinstance(p, str) and p.strip()]
+    issues = []
+    suggestions = []
+    checked = []
+
+    missing = [n for n in names if n not in found]
+    if missing:
+        issues.append("以下景点在数据库中不存在：%s" % "、".join(missing))
+
+    for name in names:
+        spot = found.get(name)
+        if not spot:
+            continue
+        hit = [p for p in prefs if p in (spot.tags or "")]
+        checked.append({"name": name, "tags": spot.tags, "hit": bool(hit)})
+        if prefs and not hit:
+            suggestions.append("「%s」不符合偏好（标签：%s）" % (name, spot.tags or "无"))
+
+    if prefs:
+        hit_count = sum(1 for c in checked if c["hit"])
+        if checked and hit_count == 0:
+            issues.append("全部 %d 个景点都不符合偏好 %s" % (len(checked), "/".join(prefs)))
+        elif checked and hit_count < len(checked):
+            issues.append("%d/%d 个景点不符合偏好 %s" % (len(checked) - hit_count, len(checked), "/".join(prefs)))
+
+    if days and per_day:
+        need = int(days) * int(per_day)
+        if len(names) < need:
+            issues.append("景点数量不足：需要 %d 个，实际 %d 个" % (need, len(names)))
+
+    # 相邻景点跨区跳跃检查（真实坐标，>30km 视为不顺路）
+    geo = [(c["name"], found[c["name"]]) for c in checked]
+    jumps = []
+    for (prev_name, prev), (next_name, nxt) in zip(geo, geo[1:]):
+        if prev.lat is None or prev.lng is None or nxt.lat is None or nxt.lng is None:
+            continue
+        dist = _haversine_km(float(prev.lat), float(prev.lng), float(nxt.lat), float(nxt.lng))
+        if dist > 30:
+            jumps.append("%s → %s 约 %.1f km" % (prev_name, next_name, dist))
+    if jumps:
+        issues.append("存在跨区域跳跃：%s" % "；".join(jumps))
+        suggestions.append("建议减少远端景点或按区域拆分行程")
+
+    score = 100 - 40 * len([i for i in issues if "不存在" in i]) \
+                - 20 * len([i for i in issues if "不符合偏好" in i or "都不符合" in i]) \
+                - 15 * len([i for i in issues if "数量不足" in i]) \
+                - 15 * len(jumps)
+    score = max(0, min(100, score))
+
+    return {
+        "city": city or None,
+        "score": score,
+        "ok": not issues,
+        "spot_count": len(names),
+        "preference_hits": sum(1 for c in checked if c["hit"]),
+        "issues": issues,
+        "suggestions": suggestions[:5],
+    }
+
+
 # 供模型使用的工具声明（JSON Schema）
 AGENT_TOOLS = [
     {
@@ -208,6 +284,28 @@ AGENT_TOOLS = [
     {
         "type": "function",
         "function": {
+            "name": "critique_route",
+            "description": "对已生成的路线做自检：景点是否真实存在、是否符合偏好、数量是否够、相邻景点是否跨区太远。生成路线后应调用一次，有 issues 时再决定是否重排。",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "spot_names": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "待检查的景点名，按路线顺序传入",
+                    },
+                    "city": {"type": "string", "description": "城市，可空"},
+                    "preferences": {"type": "array", "items": {"type": "string"}},
+                    "days": {"type": "integer"},
+                    "per_day": {"type": "integer"},
+                },
+                "required": ["spot_names"],
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "search_hotels",
             "description": "查询某城市在架酒店，可限制每晚最高价，也可按「距某景点 radius_km 内」过滤。",
             "parameters": {
@@ -230,7 +328,7 @@ AGENT_TOOLS = [
     },
 ]
 
-TOOL_NAMES = {"search_spots", "make_route", "search_hotels"}
+TOOL_NAMES = {"search_spots", "make_route", "search_hotels", "critique_route"}
 
 
 def execute_tool(name: str, args: dict, db: Session) -> dict:
@@ -242,6 +340,8 @@ def execute_tool(name: str, args: dict, db: Session) -> dict:
             return tool_search_spots(db, **args)
         if name == "make_route":
             return tool_make_route(db, **args)
+        if name == "critique_route":
+            return tool_critique_route(db, **args)
         return tool_search_hotels(db, **args)
     except TypeError as exc:
         return {"error": "参数不合法：%s" % exc}
