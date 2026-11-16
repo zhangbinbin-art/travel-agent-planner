@@ -32,11 +32,75 @@ AGENT_SYSTEM_PROMPT = (
     "4) 工具返回的景点/价格必须原样引用，不得编造；"
     "5) 路线生成后，用 150~250 字中文总结（不要 markdown），若 tips 说明景点不足，要如实解释；"
     "6) 与旅行无关的请求直接拒绝；"
-    "7) 不要重复调用同一个工具和同一组参数。"
+    "7) 不要重复调用同一个工具和同一组参数；"
+    "8) 只能引用工具返回的字段：景点名、票价、距离、酒店名、房价、距离公里数；"
+    "工具没返回的评分、里程、票价一律不许补写，也不要估算；"
+    "9) 需要具体数据时必须先调用工具；没有工具结果时只能说不确定，不得编造；"
+    "10) 历史工具事实由系统提供，以此为准；禁止否认已经发生过的工具调用，"
+    "也不得声称自己“编造了数据”；"
+    "11) 当前算法不支持「按天设置不同偏好」；当用户要求逐日不同主题时，"
+    "必须明确说明该限制，并提出可行替代（整体偏好或拆成多条路线），不要静默给出不符的路线。"
 )
 
 # 进程内会话记忆：session_id -> messages（不含 system）
 _SESSIONS: Dict[str, List[dict]] = {}
+# 会话工具事实：session_id -> [事实摘要]，每轮注入 system，避免模型“忘记查过”而胡编
+_FACTS: Dict[str, List[str]] = {}
+FACT_TURNS = 6
+FACT_MAX_CHARS = 1800
+
+
+def _facts_text(session_id: str) -> str:
+    facts = _FACTS.get(session_id) or []
+    if not facts:
+        return ""
+    text = "\n".join(facts)
+    return text[-FACT_MAX_CHARS:]
+
+
+def _remember_facts(session_id: str, facts: List[str]) -> None:
+    if not facts:
+        return
+    merged = (_FACTS.get(session_id) or []) + facts
+    _FACTS[session_id] = merged[-FACT_TURNS:]
+
+
+def _fact_from_tool(name: str, args: dict, result: dict) -> str:
+    """把工具结果压成一句可复用的事实，只保留模型允许引用的字段。"""
+    if "error" in result:
+        return "工具 %s 参数=%s 执行失败：%s" % (name, json.dumps(args, ensure_ascii=False), result["error"])
+    if name == "search_spots":
+        names = "、".join(
+            "%s(%s元)" % (x.get("name"), x.get("price")) for x in (result.get("spots") or [])[:10]
+        )
+        return "查询景点 city=%s：共 %s 条，匹配 %s 条，返回：%s" % (
+            result.get("city"), result.get("total"), result.get("matched"), names or "无"
+        )
+    if name == "make_route":
+        route = " → ".join(
+            "%s(%s元)" % (x.get("name"), x.get("price")) for x in (result.get("route_list") or [])
+        )
+        days = "；".join(
+            "第%s天:%s" % (d.get("day"), "、".join(d.get("spots") or []))
+            for d in (result.get("day_plans") or [])
+        )
+        return "生成路线 days=%s：%s；分组：%s；总里程=%s km；tips=%s" % (
+            args.get("days"), route or "无", days or "无", result.get("total_distance"), result.get("tips")
+        )
+    if name == "search_hotels":
+        hotels = "、".join(
+            "%s(%s元%s)" % (
+                h.get("name"),
+                h.get("price_per_day"),
+                "" if h.get("distance_km") is None else ",%skm" % h.get("distance_km"),
+            )
+            for h in (result.get("hotels") or [])[:8]
+        )
+        return "查询酒店 city=%s near=%s radius=%s：返回 %s 条：%s" % (
+            result.get("city"), result.get("near_spot"), result.get("radius_km"),
+            result.get("count"), hotels or "无"
+        )
+    return "工具 %s 返回：%s" % (name, json.dumps(result, ensure_ascii=False)[:300])
 
 
 def _chat(messages: List[dict], tools: Optional[List[dict]] = None) -> dict:
@@ -112,13 +176,22 @@ def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
         history = history + [{"role": "user", "content": text},
                              {"role": "assistant", "content": result["reply"]}]
         _SESSIONS[sid] = history[-MAX_HISTORY:]
+        facts = []
+        if result.get("route"):
+            facts.append(_fact_from_tool("make_route", result.get("params") or {}, result["route"]))
+        _remember_facts(sid, facts)
         result["session_id"] = sid
         return result
 
-    messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}] + history + [
-        {"role": "user", "content": text}
-    ]
+    system_messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+    facts_text = _facts_text(sid)
+    if facts_text:
+        system_messages.append(
+            {"role": "system", "content": "历史工具事实（以此为准，禁止否认或改写）：\n" + facts_text}
+        )
+    messages = system_messages + history + [{"role": "user", "content": text}]
     trace: List[dict] = []
+    turn_facts: List[str] = []
     route: Optional[dict] = None
     params: dict = {}
     reply = ""
@@ -153,6 +226,7 @@ def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
 
                 result = agent_tools.execute_tool(name, args, db)
                 ok = "error" not in result
+                turn_facts.append(_fact_from_tool(name, args, result))
                 if name == "make_route" and ok:
                     route = result
                     params = {
@@ -204,6 +278,7 @@ def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
     history = history + [{"role": "user", "content": text},
                          {"role": "assistant", "content": reply}]
     _SESSIONS[sid] = history[-MAX_HISTORY:]
+    _remember_facts(sid, turn_facts)
 
     return {
         "session_id": sid,
@@ -217,5 +292,6 @@ def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
 
 
 def reset(session_id: str) -> None:
-    """清空某个会话的记忆。"""
+    """清空某个会话的记忆与工具事实。"""
     _SESSIONS.pop(session_id, None)
+    _FACTS.pop(session_id, None)

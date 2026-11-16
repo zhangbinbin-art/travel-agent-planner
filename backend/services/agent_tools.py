@@ -12,6 +12,7 @@ from sqlalchemy.orm import Session
 from models import Hotel, Spot
 from schemas.trip import SmartRecommendRequest
 from services import trip_service
+from services.trip_service import _haversine_km
 
 # 每次返回给模型的景点/酒店条数上限
 SPOT_LIMIT = 10
@@ -90,21 +91,56 @@ def tool_make_route(db: Session, target_city: str, days: int, per_day: int = 3,
 
 
 def tool_search_hotels(db: Session, city: str, max_price: float = None,
+                       near_spot: str = None, radius_km: float = 5,
                        limit: int = HOTEL_LIMIT) -> dict:
-    """按城市查在架酒店，可按价格上限过滤。"""
+    """按城市查在架酒店，可按价格上限、以及距某景点 radius_km 内过滤。"""
     query = db.query(Hotel).filter(Hotel.status == "on_shelf", Hotel.address.contains(city))
     hotels = query.all()
+    total_in_city = len(hotels)
+
     if max_price is not None:
         try:
             cap = float(max_price)
             hotels = [h for h in hotels if float(h.price_per_day or 0) <= cap]
         except (TypeError, ValueError):
             pass
-    hotels.sort(key=lambda h: (-float(h.env_score or 0), float(h.price_per_day or 0), h.id))
-    top = hotels[: max(1, min(int(limit or HOTEL_LIMIT), 20))]
-    return {
+
+    anchor = None
+    note = None
+    if near_spot:
+        # 用景点名定位锚点；同名多城市时限定在本城市
+        spot = (
+            db.query(Spot)
+            .filter(Spot.city == city, Spot.name.contains(near_spot))
+            .filter(Spot.lng.isnot(None), Spot.lat.isnot(None))
+            .first()
+        )
+        if spot is None:
+            note = "未找到景点「%s」或该景点缺少坐标，已返回未按距离过滤的结果" % near_spot
+        else:
+            anchor = (float(spot.lat), float(spot.lng), spot.name)
+
+    result_rows = []
+    if anchor:
+        try:
+            radius = float(radius_km or 5)
+        except (TypeError, ValueError):
+            radius = 5.0
+        for h in hotels:
+            if h.lat is None or h.lng is None:
+                continue
+            dist = _haversine_km(anchor[0], anchor[1], float(h.lat), float(h.lng))
+            if dist <= radius:
+                result_rows.append((h, round(dist, 2)))
+        result_rows.sort(key=lambda item: (item[1], float(item[0].price_per_day or 0)))
+    else:
+        hotels.sort(key=lambda h: (-float(h.env_score or 0), float(h.price_per_day or 0), h.id))
+        result_rows = [(h, None) for h in hotels]
+
+    top = result_rows[: max(1, min(int(limit or HOTEL_LIMIT), 20))]
+    payload = {
         "city": city,
-        "total": len(hotels),
+        "total_in_city": total_in_city,
         "count": len(top),
         "hotels": [
             {
@@ -112,10 +148,17 @@ def tool_search_hotels(db: Session, city: str, max_price: float = None,
                 "name": h.name,
                 "price_per_day": float(h.price_per_day or 0),
                 "address": h.address,
+                "distance_km": dist,
             }
-            for h in top
+            for h, dist in top
         ],
     }
+    if anchor:
+        payload["near_spot"] = anchor[2]
+        payload["radius_km"] = float(radius_km or 5)
+    if note:
+        payload["note"] = note
+    return payload
 
 
 # 供模型使用的工具声明（JSON Schema）
@@ -166,12 +209,20 @@ AGENT_TOOLS = [
         "type": "function",
         "function": {
             "name": "search_hotels",
-            "description": "查询某城市在架酒店，可限制每晚最高价。",
+            "description": "查询某城市在架酒店，可限制每晚最高价，也可按「距某景点 radius_km 内」过滤。",
             "parameters": {
                 "type": "object",
                 "properties": {
                     "city": {"type": "string"},
                     "max_price": {"type": "number", "description": "每晚最高价，可空"},
+                    "near_spot": {
+                        "type": "string",
+                        "description": "以某个景点为圆心筛选，如 白云山；用户要求“酒店离景点近”时必填",
+                    },
+                    "radius_km": {
+                        "type": "number",
+                        "description": "距离半径（公里），默认 5",
+                    },
                 },
                 "required": ["city"],
             },
