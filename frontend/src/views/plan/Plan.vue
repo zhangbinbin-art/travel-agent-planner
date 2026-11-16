@@ -770,6 +770,8 @@ const handleRegenerate = async () => {
 const agentMessages = ref([])
 const agentSending = ref(false)
 const agentSessionId = ref('')
+// Agent 重排时排除的景点：前端复算路线必须带上，否则会与 Agent 回复不一致
+const agentExcludeSpots = ref([])
 
 // 把 Agent 解析出的参数回填到左侧表单（复用原有字段）
 const applyAgentParams = (params) => {
@@ -782,6 +784,7 @@ const applyAgentParams = (params) => {
   if (Array.isArray(params.preferences)) preferences.value = [...params.preferences]
   if (params.travel_type && travelTypes.includes(params.travel_type)) travelType.value = params.travel_type
   if (params.start_location) startLocation.value = params.start_location
+  agentExcludeSpots.value = Array.isArray(params.exclude_spots) ? [...params.exclude_spots] : []
   aiFilled.value = true
 }
 
@@ -905,6 +908,7 @@ const handleGenerate = async () => {
       days: days.value,
       per_day: perDay.value,
       hotel_per_day: null,
+      exclude_spots: agentExcludeSpots.value,
       ...buildHotelFilterPayload()
     })
     routeData.value = res.data
@@ -963,6 +967,7 @@ const resetAll = (clearCache = false) => {
   // 重置后 AI 行程说明与“参数来自 AI”标记一并失效
   aiNote.value = ''
   aiFilled.value = false
+  agentExcludeSpots.value = []
   if (clearCache) clearPlanCache()
   mapRenderToken += 1
   destroyMap()

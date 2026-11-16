@@ -487,6 +487,8 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
                         "preferences": args.get("preferences") or [],
                         "travel_type": args.get("travel_type") or "单人出行",
                         "start_location": args.get("start_location"),
+                        # 关键：把重排时的排除名单一并下发，前端复算路线时才能与 Agent 结果一致
+                        "exclude_spots": args.get("exclude_spots") or [],
                     }
                     _SNAPSHOTS[sid] = {**(_SNAPSHOTS.get(sid) or {}), **params}
 
