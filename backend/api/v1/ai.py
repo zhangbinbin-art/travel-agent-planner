@@ -67,7 +67,7 @@ def agent_plan(
     if not (payload.message or "").strip():
         raise HTTPException(status_code=400, detail="请输入需求描述")
     try:
-        return agent_runner.run(db, payload.message, payload.session_id)
+        return agent_runner.run(db, payload.message, payload.session_id, panel=payload.panel)
     except Exception as exc:
         print("[ai] agent 接口异常，返回兜底结果=%s" % exc, flush=True)
         fallback = ai_agent.plan_from_message(db, payload.message)

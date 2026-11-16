@@ -1,15 +1,18 @@
-"""多步 Agent 运行器：ReAct 式「模型 → 工具 → 观察 → 再决策」循环。
+"""多步 Agent 运行器（v1.2 增量优化版）。
 
-与单轮 /ai/plan 的区别：
-- 模型可先查景点、再决定参数、最后生成路线；
-- 工具结果以 role=tool 回填 messages，模型据此调整策略；
-- 最多 MAX_STEPS 步，超步数强制收尾，避免死循环与成本失控。
-
-无 DEEPSEEK_API_KEY 或模型不可用时，退化为「关键词解析 + 确定性路线」，接口仍可用。
+能力：
+- ReAct 循环：模型 → 工具 → 观察 → 再决策，最多 MAX_STEPS 步；
+- 偏好快照隔离：每轮使用「本轮面板偏好快照」，与对话历史分开存储；
+- 需求冲突预检测：调用工具前先跑规则表，冲突则让模型先向用户确认；
+- 单工具局部降级 + 单工具超时：某个工具失败/超时不影响其它工具结果；
+- 结构化日志：每次自检、每次重排都带 trace_id 落日志，便于复现；
+- 无 Key / 模型不可用时整体降级为「关键词解析 + 确定性路线」。
 """
 import json
+import time
 import uuid
-from typing import Dict, List, Optional, Tuple
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
+from typing import Dict, List, Optional
 
 import httpx
 from sqlalchemy.orm import Session
@@ -18,43 +21,105 @@ from core.config import settings
 from services import ai_agent, agent_tools
 
 MAX_STEPS = 8
-# 单次会话保留的消息条数（含 tool 消息），防止上下文无限增长
+# 单次会话保留的消息条数（含 tool 消息）
 MAX_HISTORY = 20
-# tool 结果回填时的字符上限
+# 单条 tool 结果回填的字符上限
 TOOL_RESULT_LIMIT = 4000
+# 单个工具超时（秒）：超时只标记该工具失败，不整体降级
+TOOL_TIMEOUT = 12
 
 AGENT_SYSTEM_PROMPT = (
-    "你是国内旅行规划 Agent。你可以调用工具查询景点、生成路线、查询酒店。"
+    "你是国内旅行规划 Agent。你可以调用工具查询景点、生成路线、自检路线、查询酒店。"
     "规则："
-    "1) 涉及具体城市时，先用 search_spots 查看真实景点数量，再调用 make_route；"
+    "1) 涉及具体城市时，先用 search_spots 查看真实景点，再调用 make_route；"
     "2) 用户提到预算或住宿时，用 search_hotels；"
     "3) 偏好只能使用：自然风光、人文古迹、美食探店、游乐乐园、城市逛街、徒步登山、海滨海岛、亲子出游；"
     "4) 工具返回的景点/价格必须原样引用，不得编造；"
-    "5) 路线生成后，用 150~250 字中文总结（不要 markdown），若 tips 说明景点不足，要如实解释；"
+    "5) 路线生成后用 150~250 字中文总结（不要 markdown）；范围外信息不要补；"
     "6) 与旅行无关的请求直接拒绝；"
-    "7) 不要重复调用同一个工具和同一组参数；"
-    "8) 只能引用工具返回的字段：景点名、票价、距离、酒店名、房价、距离公里数；"
+    "7) 不要重复调用同一工具和同一组参数；"
+    "8) 只能引用工具返回的字段（景点名、票价、距离、酒店名、房价、距离公里数）；"
     "工具没返回的评分、里程、票价一律不许补写，也不要估算；"
     "9) 需要具体数据时必须先调用工具；没有工具结果时只能说不确定，不得编造；"
-    "10) 历史工具事实由系统提供，以此为准；禁止否认已经发生过的工具调用，"
-    "也不得声称自己“编造了数据”；"
-    "11) 当前算法不支持「按天设置不同偏好」；当用户要求逐日不同主题时，"
-    "必须明确说明该限制，并提出可行替代（整体偏好或拆成多条路线），不要静默给出不符的路线；"
-    "13) 每次 make_route 之后必须调用 critique_route 自检（传入路线里的景点名、偏好、天数、每日数量）；"
-    "若 issues 里有可修复项（不符合偏好、跨区跳跃、数量不足），最多重排一次 make_route，"
-    "然后如实告知用户自检结果；ok=true 时不必重排，但在总结里说明已通过自检；"
-    "12) 用户要求「酒店离景点近 / N 公里内」但没指定圆心时，不要反问："
-    "若已有路线，直接用路线第一个景点作圆心；若还没有路线，先 make_route 再用其首站作圆心；"
-    "调用 search_hotels 时传 near_spot + radius_km（默认 5），回复中必须写明所用圆心与半径。"
+    "10) 历史工具事实由系统提供，以此为准；禁止否认已发生的工具调用，也不得声称自己“编造了数据”；"
+    "11) 当前算法不支持「按天设置不同偏好」；用户要求逐日主题时，明确说明限制并给出替代方案；"
+    "12) 用户要求「酒店离景点近 / N 公里内」但没给圆心时：有路线就用路线第一个景点，"
+    "没有先 make_route 再取首站；调用 search_hotels 传 near_spot + radius_km（默认 5），回复写明圆心与半径；"
+    "13) 每次 make_route 之后必须调用 critique_route 自检（传景点名、主/次偏好、天数、每日数量；"
+    "涉及酒店时传 hotel_list / hotel_budget / hotel_tags / hotel_max_radius）；"
+    "若 issues 中 level=severe 或存在可修复的 warn，最多重排一次 make_route，然后如实报告；"
+    "14) 自检返回的 issues_text 是给用户看的原话，转述时保持通俗；"
+    "distance_note 必须保留「球面距离≠路网通勤耗时」的说明；"
+    "15) 若系统提示检测到需求冲突，先向用户确认是否调整，确认前不要再调用工具。"
 )
 
 # 进程内会话记忆：session_id -> messages（不含 system）
 _SESSIONS: Dict[str, List[dict]] = {}
-# 会话工具事实：session_id -> [事实摘要]，每轮注入 system，避免模型“忘记查过”而胡编
+# 会话工具事实：session_id -> [事实摘要]
 _FACTS: Dict[str, List[str]] = {}
+# 偏好快照：session_id -> {preferences, main_preferences, secondary_preferences, days, per_day, travel_type, budget}
+_SNAPSHOTS: Dict[str, dict] = {}
 FACT_TURNS = 6
 FACT_MAX_CHARS = 1800
+FACT_ITEM_CHARS = 400
 
+# ---------------------------------------------------------------------------
+# 需求冲突预检测（规则表，可扩展）
+# ---------------------------------------------------------------------------
+# 每条规则：code + 判定函数 + 给 LLM 的中文提示
+CONFLICT_RULES = [
+    {
+        "code": "family_hiking",
+        "match": lambda c: c["travel_type"] in ("家庭亲子", "老年休闲") and "徒步登山" in c["preferences"],
+        "message": "出行人群是「{travel_type}」却选了高强度「徒步登山」，可能体力吃不消；是否改成自然风光或减少爬山安排？",
+    },
+    {
+        "code": "elder_hiking",
+        "match": lambda c: c["travel_type"] == "老年休闲" and "徒步登山" in c["preferences"],
+        "message": "老年休闲通常不适合长时间登山，是否换成长时间步行较少的景点？",
+    },
+    {
+        "code": "low_budget_park",
+        "match": lambda c: c["low_budget"] and "游乐乐园" in c["preferences"],
+        "message": "预算偏低但选择了游乐乐园（热门乐园门票通常较高），是否放宽预算或替换为免费公园？",
+    },
+    {
+        "code": "short_trip_far",
+        "match": lambda c: c["days"] == 1 and c["per_day"] >= 4,
+        "message": "只有 1 天却安排 4 个以上景点，通勤时间可能不够；是否减少景点数量或增加天数？",
+    },
+]
+
+LOW_BUDGET_KEYWORDS = ("预算低", "预算有限", "穷游", "省钱", "便宜", "学生党", "人均低")
+
+
+def _detect_conflicts(text: str, snapshot: dict) -> List[dict]:
+    """在调用工具前检测「人群/偏好/预算/天数」的冲突组合。"""
+    ctx = {
+        "text": text or "",
+        "preferences": list(snapshot.get("preferences") or []),
+        "travel_type": snapshot.get("travel_type") or "单人出行",
+        "days": int(snapshot.get("days") or 0) or 0,
+        "per_day": int(snapshot.get("per_day") or 0) or 0,
+        "low_budget": any(k in (text or "") for k in LOW_BUDGET_KEYWORDS)
+        or (snapshot.get("hotel_budget") is not None and float(snapshot.get("hotel_budget") or 0) <= 150),
+    }
+    conflicts = []
+    for rule in CONFLICT_RULES:
+        try:
+            if rule["match"](ctx):
+                conflicts.append({
+                    "code": rule["code"],
+                    "message": rule["message"].format(**ctx),
+                })
+        except Exception:
+            continue
+    return conflicts
+
+
+# ---------------------------------------------------------------------------
+# 记忆 / 事实 / 快照
+# ---------------------------------------------------------------------------
 
 def _facts_text(session_id: str) -> str:
     facts = _FACTS.get(session_id) or []
@@ -65,16 +130,55 @@ def _facts_text(session_id: str) -> str:
 
 
 def _remember_facts(session_id: str, facts: List[str]) -> None:
+    """事实单独压缩存储：单条截断 + 只保留最近 FACT_TURNS 条。"""
     if not facts:
         return
-    merged = (_FACTS.get(session_id) or []) + facts
+    trimmed = [(f[:FACT_ITEM_CHARS]) for f in facts if f]
+    merged = (_FACTS.get(session_id) or []) + trimmed
     _FACTS[session_id] = merged[-FACT_TURNS:]
 
 
-def _fact_from_tool(name: str, args: dict, result: dict) -> str:
+def _snapshot_text(snapshot: dict) -> str:
+    if not snapshot:
+        return ""
+    parts = []
+    if snapshot.get("preferences"):
+        parts.append("偏好=%s" % "/".join(snapshot["preferences"]))
+    if snapshot.get("main_preferences"):
+        parts.append("主偏好=%s" % "/".join(snapshot["main_preferences"]))
+    if snapshot.get("secondary_preferences"):
+        parts.append("次偏好=%s" % "/".join(snapshot["secondary_preferences"]))
+    if snapshot.get("travel_type"):
+        parts.append("人群=%s" % snapshot["travel_type"])
+    if snapshot.get("days"):
+        parts.append("天数=%s" % snapshot["days"])
+    if snapshot.get("per_day"):
+        parts.append("每日=%s" % snapshot["per_day"])
+    if snapshot.get("hotel_budget") is not None:
+        parts.append("酒店预算=%s" % snapshot["hotel_budget"])
+    if snapshot.get("origin"):
+        parts.append("来源=%s" % snapshot["origin"])
+    return "；".join(parts)
+
+
+def _update_snapshot(sid: str, args: dict) -> dict:
+    """用本轮工具参数更新偏好快照；旧轮次偏好不会污染本轮。"""
+    current = dict(_SNAPSHOTS.get(sid) or {})
+    for key in ("target_city", "preferences", "days", "per_day", "travel_type",
+                "start_location", "hotel_budget"):
+        if args.get(key) is not None:
+            current[key] = args[key]
+    current["origin"] = "tool_args"
+    _SNAPSHOTS[sid] = current
+    return current
+
+
+def _fact_from_tool(name: str, args: dict, result: dict, trace_id: Optional[str] = None) -> str:
     """把工具结果压成一句可复用的事实，只保留模型允许引用的字段。"""
     if "error" in result:
-        return "工具 %s 参数=%s 执行失败：%s" % (name, json.dumps(args, ensure_ascii=False), result["error"])
+        return "工具 %s 参数=%s 执行失败：%s" % (
+            name, json.dumps(args, ensure_ascii=False)[:200], result["error"]
+        )
     if name == "search_spots":
         names = "、".join(
             "%s(%s元)" % (x.get("name"), x.get("price")) for x in (result.get("spots") or [])[:10]
@@ -94,16 +198,16 @@ def _fact_from_tool(name: str, args: dict, result: dict) -> str:
             args.get("days"), route or "无", days or "无", result.get("total_distance"), result.get("tips")
         )
     if name == "critique_route":
-        return "自检结果 score=%s ok=%s 通过偏好=%s/%s；issues=%s；suggestions=%s" % (
-            result.get("score"), result.get("ok"), result.get("preference_hits"),
-            result.get("spot_count"), "；".join(result.get("issues") or []) or "无",
-            "；".join(result.get("suggestions") or []) or "无",
+        texts = result.get("issues_text") or []
+        return "自检结果 score=%s ok=%s 得分明细=%s；问题=%s" % (
+            result.get("score"), result.get("ok"),
+            json.dumps(result.get("score_breakdown"), ensure_ascii=False),
+            "；".join(texts) or "无",
         )
     if name == "search_hotels":
         hotels = "、".join(
             "%s(%s元%s)" % (
-                h.get("name"),
-                h.get("price_per_day"),
+                h.get("name"), h.get("price_per_day"),
                 "" if h.get("distance_km") is None else ",%skm" % h.get("distance_km"),
             )
             for h in (result.get("hotels") or [])[:8]
@@ -114,6 +218,10 @@ def _fact_from_tool(name: str, args: dict, result: dict) -> str:
         )
     return "工具 %s 返回：%s" % (name, json.dumps(result, ensure_ascii=False)[:300])
 
+
+# ---------------------------------------------------------------------------
+# 模型调用 / 工具执行
+# ---------------------------------------------------------------------------
 
 def _chat(messages: List[dict], tools: Optional[List[dict]] = None) -> dict:
     """调用 DeepSeek chat/completions；失败抛异常由上层决定降级。"""
@@ -136,9 +244,26 @@ def _chat(messages: List[dict], tools: Optional[List[dict]] = None) -> dict:
         return response.json()
 
 
-def _extract_route(trace: List[dict], route: Optional[dict]) -> Optional[dict]:
-    """返回最后一次 make_route 的完整结果（trace 里只存摘要）。"""
-    return route
+def _execute_with_timeout(name: str, args: dict, db: Session,
+                          trace_id: str) -> dict:
+    """单工具超时控制：超时只让该工具失败，不影响其它工具。"""
+    started = time.time()
+    with ThreadPoolExecutor(max_workers=1) as pool:
+        future = pool.submit(agent_tools.execute_tool, name, args, db, trace_id)
+        try:
+            result = future.result(timeout=TOOL_TIMEOUT)
+        except FutureTimeout:
+            agent_tools._log("tool_timeout", trace_id, tool=name, args=args, timeout=TOOL_TIMEOUT)
+            return {"error": "工具 %s 超时（>%ss）" % (name, TOOL_TIMEOUT), "degraded": True}
+        except Exception as exc:
+            agent_tools._log("tool_error", trace_id, tool=name, error=str(exc))
+            return {"error": "工具 %s 异常：%s" % (name, exc), "degraded": True}
+    agent_tools._log(
+        "tool_done", trace_id, tool=name, args=args,
+        elapsed=round(time.time() - started, 2),
+        degraded=bool(result.get("degraded")),
+    )
+    return result
 
 
 def _degraded_run(db: Session, message: str, history: List[dict]) -> dict:
@@ -174,14 +299,53 @@ def _degraded_run(db: Session, message: str, history: List[dict]) -> dict:
         "trace": [{"step": 0, "tool": "degraded", "args": {}, "ok": True, "summary": "关键词解析"}],
         "degraded": True,
         "steps": 0,
+        "tool_errors": [],
+        "self_check": None,
+        "conflicts": [],
     }
 
 
-def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
-    """执行一次 Agent 对话，返回可直接下发给前端的字典。"""
+# ---------------------------------------------------------------------------
+# 主流程
+# ---------------------------------------------------------------------------
+
+def run(db: Session, message: str, session_id: Optional[str] = None,
+        panel: Optional[dict] = None) -> dict:
+    """执行一次 Agent 对话。
+
+    panel 为本轮前端面板参数（可选）：{preferences, main_preferences,
+    secondary_preferences, travel_type, days, per_day, hotel_budget}；
+    不传时退回会话内的偏好快照。
+    """
     text = (message or "").strip()
     sid = session_id or uuid.uuid4().hex
+    trace_id = uuid.uuid4().hex[:12]
     history = _SESSIONS.get(sid, [])
+
+    # 偏好快照隔离：本轮优先用 panel，其次用历史快照，绝不从对话文本推断旧偏好
+    snapshot = dict(_SNAPSHOTS.get(sid) or {})
+    if panel:
+        for key, value in panel.items():
+            if value not in (None, "", []):
+                snapshot[key] = value
+        snapshot["origin"] = "panel"
+    _SNAPSHOTS[sid] = snapshot
+
+    # 首轮没有面板参数时，用关键词推断一份「临时快照」仅用于冲突预检测
+    conflict_snapshot = snapshot
+    if not snapshot.get("preferences") and not snapshot.get("travel_type"):
+        try:
+            cities = ai_agent._get_supported_cities(db)
+            inferred, _missing, _signal = ai_agent._fallback_params(text, cities)
+            conflict_snapshot = {**snapshot, **{
+                k: v for k, v in inferred.items()
+                if v not in (None, "", []) and k in ("preferences", "travel_type", "days", "per_day")
+            }, "origin": "inferred"}
+        except Exception as exc:
+            agent_tools._log("conflict_infer_failed", trace_id, error=str(exc))
+    conflicts = _detect_conflicts(text, conflict_snapshot)
+    agent_tools._log("turn_start", trace_id, session_id=sid, message=text,
+                     snapshot=snapshot, conflicts=conflicts)
 
     if not (settings.DEEPSEEK_API_KEY or "").strip():
         result = _degraded_run(db, text, history)
@@ -193,20 +357,38 @@ def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
             facts.append(_fact_from_tool("make_route", result.get("params") or {}, result["route"]))
         _remember_facts(sid, facts)
         result["session_id"] = sid
+        result["trace_id"] = trace_id
+        result["conflicts"] = conflicts
         return result
 
     system_messages = [{"role": "system", "content": AGENT_SYSTEM_PROMPT}]
+    snapshot_text = _snapshot_text(snapshot)
+    if snapshot_text:
+        system_messages.append(
+            {"role": "system", "content": "本轮参数快照（以此为准，旧轮偏好不得覆盖）：\n" + snapshot_text}
+        )
     facts_text = _facts_text(sid)
     if facts_text:
         system_messages.append(
             {"role": "system", "content": "历史工具事实（以此为准，禁止否认或改写）：\n" + facts_text}
         )
+    if conflicts:
+        system_messages.append({
+            "role": "system",
+            "content": "检测到需求冲突：\n%s\n请先用一句话向用户确认是否调整偏好/预算，"
+                       "确认前不要调用任何工具。" % "\n".join(c["message"] for c in conflicts),
+        })
     messages = system_messages + history + [{"role": "user", "content": text}]
+
     trace: List[dict] = []
     turn_facts: List[str] = []
+    tool_errors: List[str] = []
     route: Optional[dict] = None
     params: dict = {}
+    self_check: Optional[dict] = None
     reply = ""
+    replan_count = 0
+    last_route_args: Optional[dict] = None
 
     try:
         for step in range(MAX_STEPS):
@@ -236,10 +418,22 @@ def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
                 if not isinstance(args, dict):
                     args = {}
 
-                result = agent_tools.execute_tool(name, args, db)
+                result = _execute_with_timeout(name, args, db, trace_id)
                 ok = "error" not in result
-                turn_facts.append(_fact_from_tool(name, args, result))
+                if not ok:
+                    tool_errors.append("%s: %s" % (name, result.get("error")))
+
+                # 偏好快照：用本轮工具参数覆盖，供下一轮使用
+                if name in ("make_route", "search_spots") and ok:
+                    _update_snapshot(sid, args)
+
                 if name == "make_route" and ok:
+                    if last_route_args is not None:
+                        replan_count += 1
+                        agent_tools._log("replan", trace_id, round=replan_count,
+                                         prev_args=last_route_args, new_args=args,
+                                         prev_route=[x.get("name") for x in (route or {}).get("route_list") or []])
+                    last_route_args = args
                     route = result
                     params = {
                         "target_city": args.get("target_city") or result.get("target_city"),
@@ -249,42 +443,48 @@ def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
                         "travel_type": args.get("travel_type") or "单人出行",
                         "start_location": args.get("start_location"),
                     }
-                trace.append(
-                    {
-                        "step": step,
-                        "tool": name,
-                        "args": args,
-                        "ok": ok,
-                        "summary": (
-                            ("共 %s 条" % result.get("count")) if "count" in result
-                            else (result.get("error") or "ok")
-                        ),
-                    }
-                )
+                    _SNAPSHOTS[sid] = {**(_SNAPSHOTS.get(sid) or {}), **params}
+
+                if name == "critique_route" and ok:
+                    self_check = result
+                    agent_tools._log("critique_result", trace_id, score=result.get("score"),
+                                     breakdown=result.get("score_breakdown"),
+                                     issues=result.get("issues"))
+
+                turn_facts.append(_fact_from_tool(name, args, result, trace_id))
+                trace.append({
+                    "step": step,
+                    "tool": name,
+                    "args": args,
+                    "ok": ok,
+                    "summary": (
+                        ("共 %s 条" % result.get("count")) if "count" in result
+                        else ("score=%s" % result.get("score") if name == "critique_route" and ok
+                              else (result.get("error") or "ok"))
+                    ),
+                })
                 print("[agent] step=%d tool=%s ok=%s args=%s" % (step, name, ok, args), flush=True)
 
-                messages.append(
-                    {
-                        "role": "tool",
-                        "tool_call_id": call.get("id") or "%s-%d" % (name, step),
-                        "content": json.dumps(result, ensure_ascii=False)[:TOOL_RESULT_LIMIT],
-                    }
-                )
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": call.get("id") or "%s-%d" % (name, step),
+                    "content": json.dumps(result, ensure_ascii=False)[:TOOL_RESULT_LIMIT],
+                })
         else:
-            # 超出步数：让模型基于已有信息直接收尾
             messages.append(
                 {"role": "user", "content": "已达到最大工具调用步数，请基于已有信息直接给出最终方案，不要再调用工具。"}
             )
             data = _chat(messages)
-            reply = ((data.get("choices") or [{}])[0].get("message") or {}).get("content") or ""
-            reply = reply.strip()
+            reply = (((data.get("choices") or [{}])[0].get("message") or {}).get("content") or "").strip()
 
         if not reply:
             reply = "已生成路线，请查看右侧结果。"
     except Exception as exc:
-        print("[agent] 运行失败，降级=%s" % exc, flush=True)
+        agent_tools._log("agent_failed", trace_id, error=str(exc))
         result = _degraded_run(db, text, history)
         result["session_id"] = sid
+        result["trace_id"] = trace_id
+        result["conflicts"] = conflicts
         return result
 
     history = history + [{"role": "user", "content": text},
@@ -292,18 +492,28 @@ def run(db: Session, message: str, session_id: Optional[str] = None) -> dict:
     _SESSIONS[sid] = history[-MAX_HISTORY:]
     _remember_facts(sid, turn_facts)
 
+    agent_tools._log("turn_end", trace_id, session_id=sid, steps=len(trace),
+                     replan_count=replan_count, tool_errors=tool_errors,
+                     self_check_ok=(self_check or {}).get("ok"),
+                     self_check_score=(self_check or {}).get("score"))
+
     return {
         "session_id": sid,
+        "trace_id": trace_id,
         "reply": reply,
-        "route": _extract_route(trace, route),
+        "route": route,
         "params": params,
         "trace": trace,
         "degraded": False,
         "steps": len(trace),
+        "tool_errors": tool_errors,
+        "self_check": self_check,
+        "conflicts": conflicts,
     }
 
 
 def reset(session_id: str) -> None:
-    """清空某个会话的记忆与工具事实。"""
+    """清空会话的记忆、事实与偏好快照。"""
     _SESSIONS.pop(session_id, None)
     _FACTS.pop(session_id, None)
+    _SNAPSHOTS.pop(session_id, None)

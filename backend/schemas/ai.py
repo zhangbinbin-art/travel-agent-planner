@@ -63,9 +63,14 @@ class AIExplainResponse(BaseModel):
 
 
 class AgentPlanRequest(BaseModel):
-    """Agent 对话请求：message 必填，session_id 用于多轮记忆。"""
+    """Agent 对话请求：message 必填，session_id 用于多轮记忆。
+
+    panel 为本轮前端面板参数（可选），用于偏好快照隔离：
+    传了就以 panel 为准，旧轮次偏好不会覆盖本轮。
+    """
     message: str = Field(..., description="用户当前这句话")
     session_id: Optional[str] = Field(None, description="会话 ID，首次为空由后端生成")
+    panel: Optional[Dict[str, Any]] = Field(None, description="本轮面板参数快照，可选")
 
 
 class AgentTraceItem(BaseModel):
@@ -78,14 +83,22 @@ class AgentTraceItem(BaseModel):
 
 
 class AgentPlanResponse(BaseModel):
-    """Agent 结果：reply 为最终答复，route 为最后一次路线生成结果。"""
+    """Agent 结果：reply 为最终答复，route 为最后一次路线生成结果。
+
+    self_check 为 critique_route 的完整返回（含分项得分与 summary），
+    conflicts 为需求冲突预检测结果，便于前端做可视化提示。
+    """
     session_id: str
+    trace_id: Optional[str] = None
     reply: str
     route: Optional[Dict[str, Any]] = None
     params: Dict[str, Any] = Field(default_factory=dict)
     trace: List[AgentTraceItem] = Field(default_factory=list)
     degraded: bool = False
     steps: int = 0
+    tool_errors: List[str] = Field(default_factory=list)
+    self_check: Optional[Dict[str, Any]] = None
+    conflicts: List[Dict[str, Any]] = Field(default_factory=list)
 
 
 class AgentResetRequest(BaseModel):
