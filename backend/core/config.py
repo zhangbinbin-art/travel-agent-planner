@@ -12,5 +12,10 @@ class Settings:
     AMAP_KEY = os.getenv("AMAP_KEY", "")
     # Web 服务（地理编码/距离等 REST 接口）专用 Key；未单独配置时回退到 AMAP_KEY
     AMAP_WEB_KEY = os.getenv("AMAP_WEB_KEY") or os.getenv("AMAP_KEY", "")
+    # DeepSeek Function-Calling（AI 需求解析/行程解说）；留空则自动降级为关键词解析
+    DEEPSEEK_API_KEY = os.getenv("DEEPSEEK_API_KEY", "")
+    DEEPSEEK_BASE_URL = os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+    DEEPSEEK_MODEL = os.getenv("DEEPSEEK_MODEL", "deepseek-flash")
+    DEEPSEEK_TIMEOUT = int(os.getenv("DEEPSEEK_TIMEOUT", "20"))
 
 settings = Settings()

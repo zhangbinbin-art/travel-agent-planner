@@ -26,6 +26,25 @@
           <div class="panel">
             <div class="panel-title">智能偏好设置</div>
 
+            <!-- AI 一句话规划：解析结果只做预填，不替代下方原有表单 -->
+            <div class="form-block ai-entry">
+              <div class="section-label">AI 一句话规划</div>
+              <el-input
+                v-model="aiMessage"
+                type="textarea"
+                :rows="2"
+                maxlength="120"
+                show-word-limit
+                placeholder="例如：下周去广州玩两天，喜欢自然风光和美食，带爸妈，别太累"
+                class="ai-textarea"
+              />
+              <div class="ai-entry-actions">
+                <el-button type="primary" :loading="aiParsing" @click="onAiParse">AI 解析</el-button>
+              </div>
+              <div class="field-hint ai-entry-hint">说人话即可，解析结果会填到下方表单，可自行修改</div>
+              <div v-if="aiReply" class="ai-reply">{{ aiReply }}</div>
+            </div>
+
             <div class="form-block">
               <div class="section-label">出发位置</div>
               <div class="start-location-row">
@@ -145,6 +164,15 @@
         <div class="plan-col plan-col--right">
           <div class="panel" v-if="routeData">
             <div class="panel-title">路线结果</div>
+
+            <!-- AI 行程说明：仅由 AI 预填后生成路线时出现，置于总距离概览之上 -->
+            <div v-if="aiNoteLoading || aiNote" class="ai-note-card">
+              <div class="ai-note-title">AI 行程说明</div>
+              <el-skeleton v-if="aiNoteLoading" :rows="3" animated />
+              <div v-else class="ai-note-body">{{ aiNote }}</div>
+              <div class="ai-note-foot">AI 生成，仅供参考</div>
+            </div>
+
             <div class="summary">
               <div>总距离：<span class="highlight">{{ formatDistance(routeData.total_distance) }} km</span></div>
               <div>途经景点数：<span class="highlight">{{ routeData.route.length }}</span></div>
@@ -154,6 +182,11 @@
 
             <div v-if="routeData.spot_reused" class="reuse-hint">
               ⚠️ 符合偏好景点数量不足，部分日期复用热门景点
+            </div>
+
+            <!-- 后端 tips：景点不足 / 距离过滤导致数量减少时的说明 -->
+            <div v-if="routeData.tips" class="reuse-hint">
+              ⚠️ {{ routeData.tips }}
             </div>
 
             <el-divider content-position="left">路线顺序</el-divider>
@@ -316,6 +349,14 @@ const preferences = ref([])
 const days = ref(2)
 // 每日游玩景点数量（1~4）
 const perDay = ref(3)
+
+// AI 一句话规划：原始句子、解析状态、解析回执、行程说明与“当前参数来自 AI”标记
+const aiMessage = ref('')
+const aiParsing = ref(false)
+const aiReply = ref('')
+const aiNote = ref('')
+const aiNoteLoading = ref(false)
+const aiFilled = ref(false)
 
 const defaultHotelFilters = () => ({
   types: [],
@@ -713,7 +754,87 @@ const handleRegenerate = async () => {
   await handleGenerate()
 }
 
+// AI 解析：把一句话需求解析成表单参数，只预填、不自动生成路线
+const onAiParse = async () => {
+  if (!String(aiMessage.value || '').trim()) {
+    ElMessage.warning('请输入你的出行需求')
+    return
+  }
+  aiParsing.value = true
+  try {
+    const res = await api.post('/api/v1/ai/plan', { message: aiMessage.value })
+    const params = res.data?.params || {}
+    const missing = Array.isArray(res.data?.missing) ? res.data.missing : []
+
+    if (params.target_city) targetCity.value = params.target_city
+    const parsedDays = Number(params.days)
+    if (Number.isFinite(parsedDays) && parsedDays >= 1) {
+      days.value = Math.min(10, Math.round(parsedDays))
+    }
+    const parsedPerDay = Number(params.per_day)
+    if (Number.isFinite(parsedPerDay) && parsedPerDay >= 1) {
+      perDay.value = Math.min(4, Math.round(parsedPerDay))
+    }
+    if (Array.isArray(params.preferences)) preferences.value = [...params.preferences]
+    // 出行类型必须是已有选项之一，避免单选组出现空选
+    if (params.travel_type && travelTypes.includes(params.travel_type)) {
+      travelType.value = params.travel_type
+    }
+    if (params.start_location) startLocation.value = params.start_location
+
+    aiFilled.value = true
+    aiReply.value = res.data?.reply || ''
+    if (res.data?.degraded || missing.includes('target_city')) {
+      ElMessage.warning(aiReply.value || '仅部分识别，请补充目标城市')
+    } else {
+      ElMessage.success('已识别需求并填入左侧参数，可修改后点击搜索路线')
+    }
+  } catch (e) {
+    ElMessage.error(extractError(e, 'AI 解析失败'))
+  } finally {
+    aiParsing.value = false
+  }
+}
+
+// 只读汇总：从当前路线结果拼出给 AI 说明用的精简摘要（不改动 routeData / timelineItems）
+const buildAiRouteSummary = () => {
+  const route = routeData.value
+  const spots = (timelineItems.value || [])
+    .filter((item) => item.kind === 'spot')
+    .map((item) => ({ name: item.name, day: item.day, price: Number(item.price) || 0 }))
+  // 天数取“实际排出的天数”，不是用户设置值：景点不足时可能只排出 1 天
+  const planDays = (route?.day_plans || []).length
+  const maxSpotDay = spots.reduce((m, s) => Math.max(m, Number(s.day) || 0), 0)
+  return {
+    days: planDays || maxSpotDay || Number(days.value) || null,
+    total_distance: Number(route?.total_distance) || 0,
+    tips: route?.tips ?? null,
+    spots
+  }
+}
+
+// AI 行程说明：生成路线成功后补一条中文说明，失败静默（属于可选增强）
+const aiExplainRoute = async () => {
+  if (!aiFilled.value || !String(aiMessage.value || '').trim()) return
+  aiNoteLoading.value = true
+  try {
+    const res = await api.post('/api/v1/ai/explain', {
+      message: aiMessage.value,
+      route_summary: buildAiRouteSummary()
+    })
+    aiNote.value = res.data?.note || ''
+  } catch (e) {
+    // 可选增强：失败不提示，保持页面原有行为
+    aiNote.value = ''
+  } finally {
+    aiNoteLoading.value = false
+  }
+}
+
 const handleGenerate = async () => {
+  // 新一轮生成开始前清掉旧的 AI 说明，避免展示过期内容
+  aiNote.value = ''
+  aiNoteLoading.value = false
   if (!(Number(perDay.value) >= 1 && Number(perDay.value) <= 4)) {
     ElMessage.warning('每日景点数量需在 1~4 之间')
     return
@@ -764,6 +885,8 @@ const handleGenerate = async () => {
     await renderRouteMap()
     renderRouteChart()
     savePlanCache()
+    // 成功生成后补充 AI 行程说明（仅当本次参数来自 AI 解析）
+    await aiExplainRoute()
   } catch (e) {
     ElMessage.error(extractError(e, '生成智能行程失败'))
   } finally {
@@ -793,6 +916,9 @@ const resetAll = (clearCache = false) => {
   planName.value = ''
   generatedHotelPerDay.value = null
   savedTripId.value = null
+  // 重置后 AI 行程说明与“参数来自 AI”标记一并失效
+  aiNote.value = ''
+  aiFilled.value = false
   if (clearCache) clearPlanCache()
   mapRenderToken += 1
   destroyMap()
@@ -2080,5 +2206,65 @@ onBeforeUnmount(() => {
 /* ================= 按钮尺寸统一 ================= */
 .action-bar :deep(.el-button) {
   padding: 6px 14px;
+}
+
+/* ================= AI 一句话规划 / AI 行程说明 ================= */
+.ai-entry {
+  padding: 12px;
+  border: 1px dashed #dcdfe6;
+  border-radius: 8px;
+  background: #fafbfc;
+}
+.ai-entry .section-label {
+  color: #303133;
+  font-weight: 600;
+}
+.ai-entry-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+.ai-entry-hint {
+  margin: 8px 0 0;
+  line-height: 1.5;
+}
+.ai-reply {
+  margin-top: 6px;
+  color: #909399;
+  font-size: 12px;
+  line-height: 1.5;
+}
+.ai-note-card {
+  margin-bottom: 14px;
+  padding: 12px 14px;
+  border: 1px solid #ebeef5;
+  border-radius: 8px;
+  background: #f7f8fa;
+}
+.ai-note-title {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-bottom: 8px;
+  font-weight: 600;
+  color: #303133;
+}
+.ai-note-title::before {
+  content: '';
+  width: 3px;
+  height: 14px;
+  border-radius: 2px;
+  background: #f06818;
+}
+.ai-note-body {
+  color: #606266;
+  font-size: 13px;
+  line-height: 1.7;
+  white-space: pre-line;
+}
+.ai-note-foot {
+  margin-top: 8px;
+  color: #b0b3b8;
+  font-size: 12px;
 }
 </style>
