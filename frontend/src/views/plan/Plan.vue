@@ -800,10 +800,11 @@ const sendAgentMessage = async () => {
   aiMessage.value = ''
   agentSending.value = true
   try {
+    // Agent 多步工具调用耗时可能超过全局 10s 超时，这里单独放宽到 180s
     const res = await api.post('/api/v1/ai/agent/plan', {
       message: text,
       session_id: agentSessionId.value || undefined
-    })
+    }, { timeout: 180000 })
     const data = res.data || {}
     agentSessionId.value = data.session_id || agentSessionId.value
     const trace = Array.isArray(data.trace) ? data.trace : []
