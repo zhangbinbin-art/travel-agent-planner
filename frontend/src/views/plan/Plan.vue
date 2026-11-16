@@ -26,23 +26,37 @@
           <div class="panel">
             <div class="panel-title">智能偏好设置</div>
 
-            <!-- AI 一句话规划：解析结果只做预填，不替代下方原有表单 -->
+            <!-- AI 行程助手（多步 Agent）：可连续追问，生成结果直接回填右侧路线 -->
             <div class="form-block ai-entry">
-              <div class="section-label">AI 一句话规划</div>
+              <div class="section-label">AI 行程助手</div>
+              <div v-if="agentMessages.length" class="agent-chat">
+                <div v-for="(m, i) in agentMessages" :key="i" :class="['agent-msg', m.role]">
+                  <div class="agent-bubble">{{ m.content }}</div>
+                  <div v-if="m.tools && m.tools.length" class="agent-tools">
+                    工具：{{ m.tools.join(' → ') }}
+                  </div>
+                </div>
+                <div v-if="agentSending" class="agent-msg assistant">
+                  <div class="agent-bubble agent-loading">正在查询并规划…</div>
+                </div>
+              </div>
               <el-input
                 v-model="aiMessage"
                 type="textarea"
                 :rows="2"
                 maxlength="120"
                 show-word-limit
-                placeholder="例如：下周去广州玩两天，喜欢自然风光和美食，带爸妈，别太累"
+                placeholder="例如：广州两天，喜欢爬山和美食，帮我找300以内的酒店"
                 class="ai-textarea"
+                @keydown.enter.exact.prevent="sendAgentMessage"
               />
               <div class="ai-entry-actions">
-                <el-button type="primary" :loading="aiParsing" @click="onAiParse">AI 解析</el-button>
+                <el-button type="primary" :loading="agentSending" @click="sendAgentMessage">发送</el-button>
+                <el-button v-if="agentMessages.length" :disabled="agentSending" @click="newAgentChat">新对话</el-button>
               </div>
-              <div class="field-hint ai-entry-hint">说人话即可，解析结果会填到下方表单，可自行修改</div>
-              <div v-if="aiReply" class="ai-reply">{{ aiReply }}</div>
+              <div class="field-hint ai-entry-hint">
+                Agent 会先查真实景点再生成路线，可继续追问，如「换成三天」「酒店再便宜点」
+              </div>
             </div>
 
             <div class="form-block">
@@ -352,8 +366,6 @@ const perDay = ref(3)
 
 // AI 一句话规划：原始句子、解析状态、解析回执、行程说明与“当前参数来自 AI”标记
 const aiMessage = ref('')
-const aiParsing = ref(false)
-const aiReply = ref('')
 const aiNote = ref('')
 const aiNoteLoading = ref(false)
 const aiFilled = ref(false)
@@ -754,45 +766,76 @@ const handleRegenerate = async () => {
   await handleGenerate()
 }
 
-// AI 解析：把一句话需求解析成表单参数，只预填、不自动生成路线
-const onAiParse = async () => {
-  if (!String(aiMessage.value || '').trim()) {
+// ===== 多步 Agent 对话 =====
+const agentMessages = ref([])
+const agentSending = ref(false)
+const agentSessionId = ref('')
+
+// 把 Agent 解析出的参数回填到左侧表单（复用原有字段）
+const applyAgentParams = (params) => {
+  if (!params) return
+  if (params.target_city) targetCity.value = params.target_city
+  const parsedDays = Number(params.days)
+  if (Number.isFinite(parsedDays) && parsedDays >= 1) days.value = Math.min(10, Math.round(parsedDays))
+  const parsedPerDay = Number(params.per_day)
+  if (Number.isFinite(parsedPerDay) && parsedPerDay >= 1) perDay.value = Math.min(4, Math.round(parsedPerDay))
+  if (Array.isArray(params.preferences)) preferences.value = [...params.preferences]
+  if (params.travel_type && travelTypes.includes(params.travel_type)) travelType.value = params.travel_type
+  if (params.start_location) startLocation.value = params.start_location
+  aiFilled.value = true
+}
+
+const sendAgentMessage = async () => {
+  const text = String(aiMessage.value || '').trim()
+  if (!text) {
     ElMessage.warning('请输入你的出行需求')
     return
   }
-  aiParsing.value = true
+  if (!auth.token) {
+    ElMessage.warning('请先登录')
+    router.push({ path: '/login', query: { redirect: router.currentRoute.value.fullPath } })
+    return
+  }
+  agentMessages.value.push({ role: 'user', content: text, tools: [] })
+  aiMessage.value = ''
+  agentSending.value = true
   try {
-    const res = await api.post('/api/v1/ai/plan', { message: aiMessage.value })
-    const params = res.data?.params || {}
-    const missing = Array.isArray(res.data?.missing) ? res.data.missing : []
+    const res = await api.post('/api/v1/ai/agent/plan', {
+      message: text,
+      session_id: agentSessionId.value || undefined
+    })
+    const data = res.data || {}
+    agentSessionId.value = data.session_id || agentSessionId.value
+    const trace = Array.isArray(data.trace) ? data.trace : []
+    agentMessages.value.push({
+      role: 'assistant',
+      content: data.reply || '已处理',
+      tools: trace.map((t) => t.tool).filter((name, idx, arr) => arr.indexOf(name) === idx)
+    })
+    if (data.degraded) ElMessage.warning('AI 服务降级：已使用关键词解析')
 
-    if (params.target_city) targetCity.value = params.target_city
-    const parsedDays = Number(params.days)
-    if (Number.isFinite(parsedDays) && parsedDays >= 1) {
-      days.value = Math.min(10, Math.round(parsedDays))
-    }
-    const parsedPerDay = Number(params.per_day)
-    if (Number.isFinite(parsedPerDay) && parsedPerDay >= 1) {
-      perDay.value = Math.min(4, Math.round(parsedPerDay))
-    }
-    if (Array.isArray(params.preferences)) preferences.value = [...params.preferences]
-    // 出行类型必须是已有选项之一，避免单选组出现空选
-    if (params.travel_type && travelTypes.includes(params.travel_type)) {
-      travelType.value = params.travel_type
-    }
-    if (params.start_location) startLocation.value = params.start_location
-
-    aiFilled.value = true
-    aiReply.value = res.data?.reply || ''
-    if (res.data?.degraded || missing.includes('target_city')) {
-      ElMessage.warning(aiReply.value || '仅部分识别，请补充目标城市')
-    } else {
-      ElMessage.success('已识别需求并填入左侧参数，可修改后点击搜索路线')
+    const params = data.params || {}
+    if (params.target_city) {
+      applyAgentParams(params)
+      await handleGenerate()
     }
   } catch (e) {
-    ElMessage.error(extractError(e, 'AI 解析失败'))
+    agentMessages.value.push({ role: 'assistant', content: 'AI 助手暂时不可用，请重试或手动填写表单' })
+    ElMessage.error(extractError(e, 'AI 助手请求失败'))
   } finally {
-    aiParsing.value = false
+    agentSending.value = false
+  }
+}
+
+const newAgentChat = async () => {
+  const sid = agentSessionId.value
+  agentMessages.value = []
+  agentSessionId.value = ''
+  if (!sid) return
+  try {
+    await api.post('/api/v1/ai/agent/reset', { session_id: sid })
+  } catch (e) {
+    // 清空失败不影响本地新对话
   }
 }
 
@@ -2228,6 +2271,59 @@ onBeforeUnmount(() => {
   margin: 8px 0 0;
   line-height: 1.5;
 }
+.agent-chat {
+  max-height: 260px;
+  overflow-y: auto;
+  margin: 10px 0 8px;
+  padding-right: 4px;
+}
+
+.agent-msg {
+  display: flex;
+  flex-direction: column;
+  margin-bottom: 8px;
+}
+
+.agent-msg.user {
+  align-items: flex-end;
+}
+
+.agent-msg.assistant {
+  align-items: flex-start;
+}
+
+.agent-bubble {
+  max-width: 92%;
+  padding: 8px 12px;
+  border-radius: 12px;
+  font-size: 13px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+.agent-msg.user .agent-bubble {
+  background: #4f9d7a;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+
+.agent-msg.assistant .agent-bubble {
+  background: #f2f7f4;
+  color: #2f4f42;
+  border-bottom-left-radius: 4px;
+}
+
+.agent-loading {
+  color: #8aa79a;
+}
+
+.agent-tools {
+  margin-top: 4px;
+  font-size: 12px;
+  color: #96a89f;
+}
+
 .ai-reply {
   margin-top: 6px;
   color: #909399;
