@@ -47,13 +47,17 @@ AGENT_SYSTEM_PROMPT = (
     "没有先 make_route 再取首站；调用 search_hotels 传 near_spot + radius_km（默认 5），回复写明圆心与半径；"
     "13) 每次 make_route 之后必须调用 critique_route 自检（传景点名、主/次偏好、天数、每日数量；"
     "涉及酒店时传 hotel_list / hotel_budget / hotel_tags / hotel_max_radius）；"
-    "若 issues 中 level=severe 或存在可修复的 warn，最多重排一次 make_route，然后如实报告；"
+    "若 issues 中 level=severe 或存在可修复的 warn，最多重排一次 make_route；"
+    "重排必须真正改变参数：把自检 issues 里所有 code=spot_pref / spot_missing 的 target "
+    "一次性放进 exclude_spots 再排，禁止用完全相同的参数重排；重排后如实报告前后差异；"
     "14) 自检返回的 issues_text 是给用户看的原话，转述时保持通俗；"
     "distance_note 必须保留「球面距离≠路网通勤耗时」的说明；"
     "15) 若系统提示检测到需求冲突，先向用户确认是否调整，确认前不要再调用工具；"
     "16) 描述每天的属性必须有数据依据：某天内命中该主偏好的景点不足一半时，"
     "只能说「以…为主」并写明命中数量，不得说「第一天就是爬山日 / 第二天就是逛街日」；"
-    "17) 不要用「完全符合」这类绝对化表述，如有未命中偏好的景点必须点名说明。"
+    "17) 不要用「完全符合」这类绝对化表述，如有未命中偏好的景点必须点名说明；"
+    "18) 偏好只能来自用户明确表达：用户没提的偏好不得自行加入 preferences / main / secondary，"
+    "否则自检会把「自行添加的偏好」当成合规依据，掩盖真实缺口。"
 )
 
 # 进程内会话记忆：session_id -> messages（不含 system）
@@ -236,6 +240,7 @@ def _norm_route_args(args: dict) -> dict:
         "preferences": sorted(str(p) for p in prefs),
         "travel_type": args.get("travel_type") or "",
         "start_location": (args.get("start_location") or "").strip(),
+        "exclude_spots": sorted(str(n) for n in (args.get("exclude_spots") or [])),
     }
 
 
@@ -405,6 +410,7 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
     reply = ""
     replan_count = 0
     last_route_args: Optional[dict] = None
+    last_critique: Optional[dict] = None
 
     try:
         for step in range(MAX_STEPS):
@@ -433,6 +439,17 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
                         args = {}
                 if not isinstance(args, dict):
                     args = {}
+
+                # 服务端兜底：重排时自动把自检里不合格景点并入 exclude_spots，
+                # 避免模型只排除一个或忘记排除，导致重排无效
+                if name == "make_route" and last_route_args is not None and last_critique:
+                    bad = [i.get("target") for i in (last_critique.get("issues") or [])
+                           if i.get("code") in ("spot_pref", "spot_missing") and i.get("target")]
+                    if bad:
+                        merged = sorted(set(list(args.get("exclude_spots") or []) + bad))
+                        if merged != list(args.get("exclude_spots") or []):
+                            args["exclude_spots"] = merged
+                            agent_tools._log("auto_exclude", trace_id, exclude_spots=merged)
 
                 result = _execute_with_timeout(name, args, db, trace_id)
                 ok = "error" not in result
@@ -475,6 +492,7 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
 
                 if name == "critique_route" and ok:
                     self_check = result
+                    last_critique = result
                     agent_tools._log("critique_result", trace_id, score=result.get("score"),
                                      breakdown=result.get("score_breakdown"),
                                      issues=result.get("issues"))

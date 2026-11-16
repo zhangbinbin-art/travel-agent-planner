@@ -14,6 +14,8 @@ class SmartRecommendRequest(BaseModel):
     days: int = Field(1, ge=1, le=10)
     # 每日游玩景点数量(1~4)，越界由服务层自动钳位
     per_day: int = 3
+    # 排除景点（可选）：重排时排除不喜欢/不符合偏好的景点
+    exclude_spots: Optional[List[str]] = Field(default_factory=list)
     hotel_per_day: Optional[float] = Field(None, ge=0, le=100000)
     # 酒店筛选条件（可选，用于推荐同城酒店）
     hotel_types: List[str] = Field(default_factory=list)

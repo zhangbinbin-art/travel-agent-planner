@@ -119,9 +119,14 @@ def tool_search_spots(db: Session, city: str, keyword: str = "", preferences: Li
 
 def tool_make_route(db: Session, target_city: str, days: int, per_day: int = 3,
                     preferences: List[str] = None, travel_type: str = "单人出行",
-                    start_location: str = None, day_preferences: List[List[str]] = None,
+                    start_location: str = None, exclude_spots: List[str] = None,
+                    day_preferences: List[List[str]] = None,
                     trace_id: Optional[str] = None) -> dict:
-    """调用现有确定性算法生成路线；day_preferences 为 v1.2 预留（当前不生效）。"""
+    """调用现有确定性算法生成路线。
+
+    exclude_spots：可选，排除指定景点（重排时用，保证第二次结果会变化）；
+    day_preferences 为 v1.2 预留（当前不生效）。
+    """
     if day_preferences:
         _log("make_route.day_preferences_ignored", trace_id, target_city=target_city,
              day_preferences=day_preferences)
@@ -132,6 +137,7 @@ def tool_make_route(db: Session, target_city: str, days: int, per_day: int = 3,
         preferences=preferences or [],
         travel_type=travel_type or "单人出行",
         start_location=start_location,
+        exclude_spots=exclude_spots or [],
     )
     res = trip_service.smart_recommend(db, payload)
     day_plans = [
@@ -148,6 +154,7 @@ def tool_make_route(db: Session, target_city: str, days: int, per_day: int = 3,
         "day_plans": day_plans,
         "total_distance": res.get("total_distance"),
         "tips": res.get("tips"),
+        "excluded_spots": exclude_spots or [],
     }
 
 
@@ -468,6 +475,11 @@ AGENT_TOOLS = [
                     "travel_type": {"type": "string",
                                     "enum": ["单人出行", "情侣出行", "家庭亲子", "老年休闲"]},
                     "start_location": {"type": "string"},
+                    "exclude_spots": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "排除景点名（重排时排除不符合偏好的景点，避免同参数重排无变化）",
+                    },
                     "day_preferences": {
                         "type": "array",
                         "items": {"type": "array", "items": {"type": "string"}},

@@ -905,6 +905,12 @@ def recommend_hotels(db: Session, payload) -> list:
 def smart_recommend(db: Session, payload) -> dict:
     """单目的地智能推荐：评分排序 -> 按天拆分(每日≤3) -> 就近排序 -> 预算与酒店。"""
     spots = db.query(Spot).filter(Spot.city == payload.target_city).all()
+    # 可选排除名单：重排时排除不符合偏好的景点，保证第二次结果真的会变
+    excluded = [str(n).strip() for n in (getattr(payload, "exclude_spots", None) or []) if str(n or "").strip()]
+    if excluded:
+        before = len(spots)
+        spots = [s for s in spots if s.name not in excluded]
+        print("[smart_recommend] 排除景点：%s（%d -> %d）" % (",".join(excluded), before, len(spots)), flush=True)
     if not spots:
         raise ValueError(f"目标城市暂无可推荐景点: {payload.target_city}")
 
