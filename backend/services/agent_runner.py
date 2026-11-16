@@ -50,7 +50,10 @@ AGENT_SYSTEM_PROMPT = (
     "若 issues 中 level=severe 或存在可修复的 warn，最多重排一次 make_route，然后如实报告；"
     "14) 自检返回的 issues_text 是给用户看的原话，转述时保持通俗；"
     "distance_note 必须保留「球面距离≠路网通勤耗时」的说明；"
-    "15) 若系统提示检测到需求冲突，先向用户确认是否调整，确认前不要再调用工具。"
+    "15) 若系统提示检测到需求冲突，先向用户确认是否调整，确认前不要再调用工具；"
+    "16) 描述每天的属性必须有数据依据：某天内命中该主偏好的景点不足一半时，"
+    "只能说「以…为主」并写明命中数量，不得说「第一天就是爬山日 / 第二天就是逛街日」；"
+    "17) 不要用「完全符合」这类绝对化表述，如有未命中偏好的景点必须点名说明。"
 )
 
 # 进程内会话记忆：session_id -> messages（不含 system）
@@ -222,6 +225,19 @@ def _fact_from_tool(name: str, args: dict, result: dict, trace_id: Optional[str]
 # ---------------------------------------------------------------------------
 # 模型调用 / 工具执行
 # ---------------------------------------------------------------------------
+
+def _norm_route_args(args: dict) -> dict:
+    """把 make_route 参数归一化成可比较的字典，用于判断是否为无效重排。"""
+    prefs = args.get("preferences") or []
+    return {
+        "target_city": (args.get("target_city") or "").strip(),
+        "days": int(args.get("days") or 0),
+        "per_day": int(args.get("per_day") or 0),
+        "preferences": sorted(str(p) for p in prefs),
+        "travel_type": args.get("travel_type") or "",
+        "start_location": (args.get("start_location") or "").strip(),
+    }
+
 
 def _chat(messages: List[dict], tools: Optional[List[dict]] = None) -> dict:
     """调用 DeepSeek chat/completions；失败抛异常由上层决定降级。"""
@@ -429,10 +445,22 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
 
                 if name == "make_route" and ok:
                     if last_route_args is not None:
-                        replan_count += 1
-                        agent_tools._log("replan", trace_id, round=replan_count,
-                                         prev_args=last_route_args, new_args=args,
-                                         prev_route=[x.get("name") for x in (route or {}).get("route_list") or []])
+                        prev_norm = _norm_route_args(last_route_args)
+                        new_norm = _norm_route_args(args)
+                        if prev_norm == new_norm:
+                            # 参数完全相同：确定性算法必然返回同样路线，标记为无效重排
+                            result["replan_noop"] = True
+                            result["note"] = (
+                                "本次 make_route 参数与上一次完全相同，确定性算法结果不会变化；"
+                                "请不要再以相同参数重排，改为调整偏好/天数/每日数量，或如实告知用户"
+                            )
+                            agent_tools._log("replan_skipped", trace_id,
+                                             same_args=args, route=[x.get("name") for x in result.get("route_list") or []])
+                        else:
+                            replan_count += 1
+                            agent_tools._log("replan", trace_id, round=replan_count,
+                                             prev_args=last_route_args, new_args=args,
+                                             prev_route=[x.get("name") for x in (route or {}).get("route_list") or []])
                     last_route_args = args
                     route = result
                     params = {
