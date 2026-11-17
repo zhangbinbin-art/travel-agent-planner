@@ -812,8 +812,55 @@ const makeTask = (title = '新的规划任务') => ({
   updatedAt: nowLabel()
 })
 
-const tasks = ref([makeTask()])
-const currentTaskId = ref(tasks.value[0].id)
+// 任务列表持久化：刷新页面后仍保留历史任务与消息
+const TASK_STORAGE_KEY = 'plan_agent_tasks_v1'
+
+const loadStoredTasks = () => {
+  try {
+    const raw = localStorage.getItem(TASK_STORAGE_KEY)
+    if (!raw) return null
+    const data = JSON.parse(raw)
+    const list = (data.tasks || [])
+      .filter((t) => t && t.id)
+      .map((t) => ({
+        id: t.id,
+        title: t.title || '新的规划任务',
+        messages: Array.isArray(t.messages) ? t.messages.map((m) => ({ ...m, typing: false })) : [],
+        sessionId: t.sessionId || '',
+        routeData: null,
+        updatedAt: t.updatedAt || nowLabel()
+      }))
+    if (!list.length) return null
+    const currentId = list.some((t) => t.id === data.currentId) ? data.currentId : list[0].id
+    return { tasks: list, currentId }
+  } catch (e) {
+    return null
+  }
+}
+
+const storedTasks = loadStoredTasks()
+const tasks = ref(storedTasks ? storedTasks.tasks : [makeTask()])
+const currentTaskId = ref(storedTasks ? storedTasks.currentId : tasks.value[0].id)
+
+const saveTasks = () => {
+  try {
+    const payload = {
+      currentId: currentTaskId.value,
+      tasks: tasks.value.map((t) => ({
+        id: t.id,
+        title: t.title,
+        messages: t.messages,
+        sessionId: t.sessionId,
+        updatedAt: t.updatedAt
+      }))
+    }
+    localStorage.setItem(TASK_STORAGE_KEY, JSON.stringify(payload))
+  } catch (e) {
+    // 存储失败不影响使用
+  }
+}
+
+watch([tasks, currentTaskId], saveTasks, { deep: true })
 const currentTask = computed(
   () => tasks.value.find((t) => t.id === currentTaskId.value) || tasks.value[0]
 )

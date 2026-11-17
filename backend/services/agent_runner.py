@@ -18,9 +18,11 @@ import httpx
 from sqlalchemy.orm import Session
 
 from core.config import settings
-from services import ai_agent, agent_tools
+from services import agent_session_store, agent_tools, ai_agent
 
 MAX_STEPS = 8
+# 最多自动重排次数（第二次仅用于修复 severe 问题）
+MAX_REPLANS = 2
 # 单次会话保留的消息条数（含 tool 消息）
 MAX_HISTORY = 20
 # 单条 tool 结果回填的字符上限
@@ -53,7 +55,7 @@ AGENT_SYSTEM_PROMPT = (
     "没有先 make_route 再取首站；调用 search_hotels 传 near_spot + radius_km（默认 5），回复写明圆心与半径；"
     "13) 每次 make_route 之后必须调用 critique_route 自检（传景点名、主/次偏好、天数、每日数量；"
     "涉及酒店时传 hotel_list / hotel_budget / hotel_tags / hotel_max_radius）；"
-    "若 issues 中 level=severe 或存在可修复的 warn，最多重排一次 make_route；"
+    "若 issues 中 level=severe 或存在可修复的 warn，最多重排两次 make_route（第二次仅当仍有 severe 问题）；"
     "重排必须真正改变参数：把自检 issues 里所有 code=spot_pref / spot_missing 的 target "
     "一次性放进 exclude_spots 再排，禁止用完全相同的参数重排；重排后如实报告前后差异；"
     "14) 自检返回的 issues_text 是给用户看的原话，转述时保持通俗；"
@@ -145,6 +147,16 @@ def _detect_conflicts(text: str, snapshot: dict) -> List[dict]:
 # ---------------------------------------------------------------------------
 # 记忆 / 事实 / 快照
 # ---------------------------------------------------------------------------
+
+def _persist(session_id: str) -> None:
+    """把当前会话状态写盘，供重启后恢复。"""
+    agent_session_store.save(
+        session_id,
+        _SESSIONS.get(session_id) or [],
+        _FACTS.get(session_id) or [],
+        _SNAPSHOTS.get(session_id) or {},
+    )
+
 
 def _facts_text(session_id: str) -> str:
     facts = _FACTS.get(session_id) or []
@@ -367,6 +379,15 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
     sid = session_id or uuid.uuid4().hex
     trace_id = uuid.uuid4().hex[:12]
     history = _SESSIONS.get(sid, [])
+    # 后端重启后从磁盘恢复会话（历史 / 事实 / 偏好快照）
+    if session_id and not history and not _FACTS.get(sid) and not _SNAPSHOTS.get(sid):
+        saved = agent_session_store.load(sid)
+        if saved:
+            history = saved.get("messages") or []
+            _SESSIONS[sid] = history
+            _FACTS[sid] = saved.get("facts") or []
+            _SNAPSHOTS[sid] = saved.get("snapshot") or {}
+            print("[agent-session] 已恢复会话 %s（%d 条消息）" % (sid, len(history)), flush=True)
 
     # 偏好快照隔离：本轮优先用 panel，其次用历史快照，绝不从对话文本推断旧偏好
     snapshot = dict(_SNAPSHOTS.get(sid) or {})
@@ -402,6 +423,7 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
         if result.get("route"):
             facts.append(_fact_from_tool("make_route", result.get("params") or {}, result["route"]))
         _remember_facts(sid, facts)
+        _persist(sid)
         result["session_id"] = sid
         result["trace_id"] = trace_id
         result["conflicts"] = conflicts
@@ -485,6 +507,24 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
                 if name in ("make_route", "search_spots") and ok:
                     _update_snapshot(sid, args)
 
+                # 确定性兜底：天数排不满时自动降低 per_day 重试一次，避免第三天为空
+                if name == "make_route" and ok:
+                    need_days = int(args.get("days") or 0)
+                    planned = len(result.get("day_plans") or [])
+                    per_day_now = int(args.get("per_day") or 3)
+                    if need_days and planned < need_days and per_day_now > 1:
+                        trial_args = dict(args)
+                        trial_args["per_day"] = per_day_now - 1
+                        trial = agent_tools.tool_make_route(db, **trial_args)
+                        if len(trial.get("day_plans") or []) > planned:
+                            agent_tools._log("auto_fill_days", trace_id,
+                                             from_per_day=per_day_now,
+                                             to_per_day=trial_args["per_day"],
+                                             planned_before=planned,
+                                             planned_after=len(trial.get("day_plans") or []))
+                            result = trial
+                            args = trial_args
+
                 if name == "make_route" and ok:
                     if last_route_args is not None:
                         prev_norm = _norm_route_args(last_route_args)
@@ -498,6 +538,10 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
                             )
                             agent_tools._log("replan_skipped", trace_id,
                                              same_args=args, route=[x.get("name") for x in result.get("route_list") or []])
+                        elif replan_count >= MAX_REPLANS:
+                            result["replan_noop"] = True
+                            result["note"] = "已达到最大重排次数（%d 次），请直接向用户总结现有路线" % MAX_REPLANS
+                            agent_tools._log("replan_limited", trace_id, replan_count=replan_count, args=args)
                         else:
                             replan_count += 1
                             agent_tools._log("replan", trace_id, round=replan_count,
@@ -565,6 +609,8 @@ def run(db: Session, message: str, session_id: Optional[str] = None,
     _SESSIONS[sid] = history[-MAX_HISTORY:]
     _remember_facts(sid, turn_facts)
 
+    _persist(sid)
+
     agent_tools._log("turn_end", trace_id, session_id=sid, steps=len(trace),
                      replan_count=replan_count, tool_errors=tool_errors,
                      self_check_ok=(self_check or {}).get("ok"),
@@ -590,3 +636,4 @@ def reset(session_id: str) -> None:
     _SESSIONS.pop(session_id, None)
     _FACTS.pop(session_id, None)
     _SNAPSHOTS.pop(session_id, None)
+    agent_session_store.delete(session_id)
