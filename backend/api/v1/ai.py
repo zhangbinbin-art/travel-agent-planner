@@ -17,8 +17,10 @@ from schemas.ai import (
     AgentPlanRequest,
     AgentPlanResponse,
     AgentResetRequest,
+    SpotIntroRequest,
+    SpotIntroResponse,
 )
-from services import agent_runner, ai_agent
+from services import agent_runner, ai_agent, spot_intro
 
 router = APIRouter()
 
@@ -90,3 +92,20 @@ def agent_reset(
     """清空指定会话的上下文记忆。"""
     agent_runner.reset(payload.session_id)
     return {"ok": True, "session_id": payload.session_id}
+
+
+@router.post("/spots/intro", response_model=SpotIntroResponse)
+def spots_intro(
+    payload: SpotIntroRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """按景点名生成一段介绍（RAG + LLM，失败自动降级）。"""
+    names = [n for n in (payload.spot_names or []) if str(n or "").strip()]
+    if not names:
+        raise HTTPException(status_code=400, detail="请提供景点名称")
+    try:
+        return spot_intro.build_intro(db, names)
+    except Exception as exc:
+        print("[ai] 景点介绍接口异常=%s" % exc, flush=True)
+        return {"note": "景点介绍暂时不可用", "degraded": True}

@@ -1,290 +1,248 @@
 <template>
-  <div class="plan">
-    <section class="page-card">
-      <header class="page-head">
-        <div class="page-heading">
-          <span class="tr-section-sub">AI PLANNER</span>
-          <h1 class="tr-section-title">智能路线规划</h1>
-        </div>
-      </header>
-
-      <div class="action-bar">
-        <el-button type="primary" :loading="generating" @click="handleGenerate">生成路线</el-button>
-        <el-button :disabled="!routeData" :loading="generating" @click="handleRegenerate">重新生成</el-button>
-        <el-button :disabled="!routeData" :loading="saving" @click="handleSave">保存路线</el-button>
-        <el-button :disabled="!routeData" @click="exportRoute">导出路线</el-button>
-        <el-input
-          v-model="planName"
-          class="plan-name-input"
-          placeholder="路线名称（保存用）"
-        />
-        <el-button text @click="handleReset">重置</el-button>
+  <div class="plan layout3">
+    <!-- ===== 左栏：Agent 任务会话 + 底部提问框 ===== -->
+    <aside class="col-tasks">
+      <div class="tasks-head">
+        <span class="tasks-title">Agent 任务</span>
+        <el-button class="tasks-add" size="small" circle @click="createTask">+</el-button>
       </div>
 
-      <div class="plan-grid">
-        <div class="plan-col plan-col--left">
-          <div class="panel">
-            <div class="panel-title">智能偏好设置</div>
+      <div class="task-list">
+        <div
+          v-for="t in tasks"
+          :key="t.id"
+          class="task-item"
+          :class="{ active: t.id === currentTaskId }"
+          @click="switchTask(t.id)"
+        >
+          <div class="task-name">{{ t.title }}</div>
+          <div class="task-sub">{{ t.updatedAt }} · {{ t.messages.length }} 条</div>
+        </div>
+      </div>
 
-            <!-- AI 行程助手（多步 Agent）：可连续追问，生成结果直接回填右侧路线 -->
-            <div class="form-block ai-entry">
-              <div class="section-label">AI 行程助手</div>
-              <div v-if="agentMessages.length" class="agent-chat">
-                <div v-for="(m, i) in agentMessages" :key="i" :class="['agent-msg', m.role]">
-                  <div class="agent-bubble">{{ m.content }}</div>
-                  <div v-if="m.tools && m.tools.length" class="agent-tools">
-                    工具：{{ m.tools.join(' → ') }}
-                  </div>
-                </div>
-                <div v-if="agentSending" class="agent-msg assistant">
-                  <div class="agent-bubble agent-loading">正在查询并规划…</div>
-                </div>
-              </div>
-              <el-input
-                v-model="aiMessage"
-                type="textarea"
-                :rows="2"
-                maxlength="120"
-                show-word-limit
-                placeholder="例如：广州两天，喜欢爬山和美食，帮我找300以内的酒店"
-                class="ai-textarea"
-                @keydown.enter.exact.prevent="sendAgentMessage"
-              />
-              <div class="ai-entry-actions">
-                <el-button type="primary" :loading="agentSending" @click="sendAgentMessage">发送</el-button>
-                <el-button v-if="agentMessages.length" :disabled="agentSending" @click="newAgentChat">新对话</el-button>
-              </div>
-              <div class="field-hint ai-entry-hint">
-                Agent 会先查真实景点再生成路线，可继续追问，如「换成三天」「酒店再便宜点」
-              </div>
-            </div>
+    </aside>
 
-            <div class="form-block">
-              <div class="section-label">出发位置</div>
+    <!-- ===== 中栏：主对话区（可滚动） ===== -->
+    <main class="col-chat">
+      <div class="chat-head">
+        <div>
+          <div class="chat-title">AI 行程助手</div>
+          <div class="chat-sub">Agent 会先查真实景点，再生成路线并自检</div>
+        </div>
+        <el-button text class="chat-new" @click="createTask">新对话</el-button>
+      </div>
+
+      <!-- 操作按钮行：保留原有生成/保存/导出能力 -->
+      <div class="chat-toolbar">
+        <el-button size="small" type="primary" :loading="generating" @click="handleGenerate()">生成路线</el-button>
+        <el-button size="small" :disabled="!routeData" @click="handleRegenerate">重新生成</el-button>
+        <el-button size="small" :disabled="!routeData" :loading="saving" @click="handleSave">保存</el-button>
+        <el-button size="small" :disabled="!routeData" @click="exportRoute">导出</el-button>
+        <el-button size="small" text @click="handleReset">重置</el-button>
+        <el-input v-model="planName" size="small" class="plan-name-input" placeholder="路线名称（保存用）" />
+      </div>
+
+      <!-- 偏好快照：默认一行展示，可展开编辑 -->
+      <div class="pref-bar">
+        <div class="pref-line" @click="prefOpen = !prefOpen">
+          <span class="pref-title">偏好快照</span>
+          <span class="pref-summary">{{ prefSummary }}</span>
+          <span class="pref-toggle">{{ prefOpen ? '收起' : '展开' }}</span>
+        </div>
+        <div v-show="prefOpen" class="pref-body">
+          <div class="pref-grid">
+            <div class="pref-field">
+              <div class="field-label">出发位置</div>
               <div class="start-location-row">
-                <el-input
-                  v-model="startLocation"
-                  placeholder="请输入出发城市，如：杭州"
-                  clearable
-                  class="start-city-input"
-                />
+                <el-input v-model="startLocation" placeholder="如：惠州" clearable />
                 <el-button @click="openMapPicker">地图选点</el-button>
               </div>
-              <div v-if="startLat && startLng" class="coord-tip">
-                已选取坐标：{{ startLat }}, {{ startLng }}
-              </div>
+              <div v-if="startLat && startLng" class="coord-tip">已选取：{{ startLat }}, {{ startLng }}</div>
             </div>
-
-            <div class="form-block">
-              <div class="section-label">目标地区（单城市）</div>
-              <div class="target-city-row">
-                <el-input
-                  v-model="targetCity"
-                  placeholder="例如：杭州"
-                  clearable
-                  @keyup.enter="handleGenerate"
-                />
-                <el-button type="primary" :loading="generating" @click="handleGenerate">搜索路线</el-button>
-              </div>
+            <div class="pref-field">
+              <div class="field-label">目标地区（单城市）</div>
+              <el-input v-model="targetCity" placeholder="如：广州" clearable @keyup.enter="handleGenerate()" />
             </div>
+          </div>
 
-            <div class="form-block">
-              <div class="section-label">出行类型</div>
-              <el-radio-group v-model="travelType" class="type-group">
-                <el-radio-button v-for="t in travelTypes" :key="t" :value="t">{{ t }}</el-radio-button>
-              </el-radio-group>
-            </div>
+          <div class="pref-field">
+            <div class="field-label">出行类型</div>
+            <el-radio-group v-model="travelType" class="type-group">
+              <el-radio-button v-for="t in travelTypes" :key="t" :value="t">{{ t }}</el-radio-button>
+            </el-radio-group>
+          </div>
 
-            <div class="form-block">
-              <div class="section-label">游玩偏好（可多选）</div>
-              <el-checkbox-group v-model="preferences" class="pref-group">
-                <el-checkbox-button v-for="p in prefOptions" :key="p" :value="p">{{ p }}</el-checkbox-button>
-              </el-checkbox-group>
-            </div>
+          <div class="pref-field">
+            <div class="field-label">游玩偏好（可多选）</div>
+            <el-checkbox-group v-model="preferences" class="pref-group">
+              <el-checkbox-button v-for="p in prefOptions" :key="p" :value="p">{{ p }}</el-checkbox-button>
+            </el-checkbox-group>
+          </div>
 
-            <div class="form-block days-section">
-              <div class="section-label">游玩天数</div>
+          <div class="pref-grid">
+            <div class="pref-field pref-field--num">
+              <div class="field-label">游玩天数</div>
               <el-input-number v-model="days" :min="1" :max="10" />
             </div>
-
-            <div class="form-block days-section">
-              <div class="section-label">每日景点数量</div>
+            <div class="pref-field pref-field--num">
+              <div class="field-label">每日景点</div>
               <el-input-number v-model="perDay" :min="1" :max="4" :step="1" />
             </div>
-            <div class="field-hint">每天规划 1~4 个景点</div>
-
-            <div class="hotel-block">
-              <div class="panel-title">酒店预订（可选）</div>
-
-              <div class="form-block">
-                <div class="section-label">酒店筛选与选择</div>
-                <HotelPicker
-                  v-model="selectedHotelId"
-                  :city="targetCity.trim()"
-                  :allow-custom="!hasGeneratedRoute"
-                  :generated="hasGeneratedRoute"
-                  :hotel-markers="routeData?.hotel_markers || []"
-                  :reset-signal="hotelResetSignal"
-                  :filter-seed="hotelFilterSeed"
-                  @change="onHotelChange"
-                  @filters-change="hotelFilters = $event"
-                />
-              </div>
-
-              <div v-if="selectedHotelId" class="hotel-hint">已按所选酒店单价自动带入预算</div>
-
-              <div class="booking-block">
-                <el-form label-width="90px">
-                <el-form-item label="入住日期">
-                  <el-date-picker
-                    v-model="bookingStart"
-                    type="date"
-                    value-format="YYYY-MM-DD"
-                    placeholder="选择入住日期"
-                    style="width: 100%"
-                  />
-                </el-form-item>
-                <el-form-item label="离店日期">
-                  <el-date-picker
-                    v-model="bookingEnd"
-                    type="date"
-                    value-format="YYYY-MM-DD"
-                    placeholder="选择离店日期"
-                    style="width: 100%"
-                  />
-                </el-form-item>
-                <el-form-item label="入住人数">
-                  <el-input-number v-model="guestCount" :min="1" :max="10" />
-                </el-form-item>
-                <el-form-item label="备注">
-                  <el-input v-model="remark" maxlength="200" placeholder="选填，如房型偏好、到店时间" />
-                </el-form-item>
-                <el-form-item>
-                  <el-button
-                    type="success"
-                    :disabled="!selectedHotelId"
-                    :loading="bookingSubmitting"
-                    @click="submitBooking"
-                  >
-                    提交酒店预约
-                  </el-button>
-                </el-form-item>
-              </el-form>
-              </div>
-            </div>
           </div>
-        </div>
 
-        <div class="plan-col plan-col--right">
-          <div class="panel" v-if="routeData">
-            <div class="panel-title">路线结果</div>
-
-            <!-- AI 行程说明：仅由 AI 预填后生成路线时出现，置于总距离概览之上 -->
-            <div v-if="aiNoteLoading || aiNote" class="ai-note-card">
-              <div class="ai-note-title">AI 行程说明</div>
-              <el-skeleton v-if="aiNoteLoading" :rows="3" animated />
-              <div v-else class="ai-note-body">{{ aiNote }}</div>
-              <div class="ai-note-foot">AI 生成，仅供参考</div>
-            </div>
-
-            <div class="summary">
-              <div>总距离：<span class="highlight">{{ formatDistance(routeData.total_distance) }} km</span></div>
-              <div>途经景点数：<span class="highlight">{{ routeData.route.length }}</span></div>
-              <div>目标城市：<span class="highlight">{{ routeData.target_city || targetCity }}</span></div>
-              <div>起点：<span class="highlight">{{ startSpotName }}</span></div>
-            </div>
-
-            <div v-if="routeData.spot_reused" class="reuse-hint">
-              ⚠️ 符合偏好景点数量不足，部分日期复用热门景点
-            </div>
-
-            <!-- 后端 tips：景点不足 / 距离过滤导致数量减少时的说明 -->
-            <div v-if="routeData.tips" class="reuse-hint">
-              ⚠️ {{ routeData.tips }}
-            </div>
-
-            <el-divider content-position="left">路线顺序</el-divider>
-            <div class="route-timeline">
-              <div
-                v-for="(item, idx) in timelineItems"
-                :key="item.key"
-                class="timeline-row"
-                :class="item.kind"
-              >
-                <div class="timeline-marker">
-                  <span class="timeline-dot" :class="item.kind"></span>
-                  <span
-                    v-if="idx < timelineItems.length - 1"
-                    class="timeline-connector"
-                  ></span>
-                </div>
-                <div class="timeline-content" @click="onTimelineClick(item)">
-                  <div class="timeline-title">
-                    <template v-if="item.kind === 'spot'">
-                      {{ item.no }}. {{ item.name }}（{{ item.city }}）
-                    </template>
-                    <template v-else>
-                      {{ item.name }}<span v-if="item.city">（{{ item.city }}）</span>
-                    </template>
-                  </div>
-                  <div class="timeline-meta">
-                    <template v-if="item.kind === 'spot'">
-                      评分：{{ item.score }} ｜ 票价：{{ Number(item.price) > 0 ? item.price + '元' : '免费' }} ｜
-                    </template>
-                    第{{ item.day }}天
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <el-divider content-position="left">配套酒店推荐</el-divider>
-            <div class="hotel-recommend">
-              <div v-if="hotelMarkers.length" class="hotel-list">
-                <article
-                  v-for="h in hotelMarkers"
-                  :key="h.id"
-                  class="hotel-item"
-                  @click="goHotelDetail(h.id)"
-                >
-                  <div class="hotel-item-main">
-                    <div class="hotel-item-name">{{ h.name }}</div>
-                    <div class="hotel-item-addr">{{ h.address || '地址信息暂无' }}</div>
-                  </div>
-                  <div class="hotel-item-price">
-                    ¥{{ formatMoney(h.price) }}<span class="unit">/晚</span>
-                  </div>
-                </article>
-              </div>
-              <div v-else class="hotel-empty">暂无配套推荐酒店</div>
-            </div>
-
-            <el-divider content-position="left">路线图</el-divider>
-            <el-tabs v-model="routeView" class="route-view-tabs" @tab-change="onRouteViewChange">
-              <el-tab-pane label="高德地图" name="map">
-                <div v-show="mapVisible" class="map-wrap">
-                  <div ref="mapRef" class="plan-map"></div>
-                  <div class="map-legend">
-                    <span class="legend-item"><i class="legend-dot legend-spot"></i>游览景点</span>
-                    <span class="legend-item"><i class="legend-dot legend-hotel"></i>周边酒店</span>
-                  </div>
-                </div>
-                <el-empty
-                  v-if="!mapVisible"
-                  description="地图暂不可用，可切换到“路线示意图”查看"
-                  :image-size="60"
-                />
-              </el-tab-pane>
-              <el-tab-pane label="路线示意图" name="chart">
-                <div ref="chartRef" class="plan-chart"></div>
-              </el-tab-pane>
-            </el-tabs>
-
+          <div class="pref-field">
+            <div class="field-label">酒店筛选与选择</div>
+            <HotelPicker
+              v-model="selectedHotelId"
+              :city="targetCity.trim()"
+              :allow-custom="!hasGeneratedRoute"
+              :generated="hasGeneratedRoute"
+              :hotel-markers="routeData?.hotel_markers || []"
+              :reset-signal="hotelResetSignal"
+              :filter-seed="hotelFilterSeed"
+              @change="onHotelChange"
+              @filters-change="hotelFilters = $event"
+            />
           </div>
-          <el-empty v-else description="请填写偏好并生成智能行程" />
+
+          <div class="booking-block">
+            <el-form label-width="86px" size="small">
+              <el-form-item label="入住日期">
+                <el-date-picker v-model="bookingStart" type="date" value-format="YYYY-MM-DD" placeholder="选择入住日期" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="离店日期">
+                <el-date-picker v-model="bookingEnd" type="date" value-format="YYYY-MM-DD" placeholder="选择离店日期" style="width: 100%" />
+              </el-form-item>
+              <el-form-item label="入住人数">
+                <el-input-number v-model="guestCount" :min="1" :max="10" />
+              </el-form-item>
+              <el-form-item label="备注">
+                <el-input v-model="remark" maxlength="200" placeholder="选填，如房型偏好" />
+              </el-form-item>
+              <el-form-item>
+                <el-button type="warning" :disabled="!selectedHotelId" :loading="bookingSubmitting" @click="submitBooking">
+                  提交酒店预约
+                </el-button>
+              </el-form-item>
+            </el-form>
+          </div>
         </div>
       </div>
-    </section>
 
+      <!-- 消息流滚动区：chat-flow 为滚动容器；chat-lead 负责把内容压到中下部 -->
+      <div ref="messageListRef" class="chat-flow">
+        <div class="chat-lead"></div>
+        <div v-for="m in currentMessages" :key="m.id" class="msg-row" :class="m.role">
+          <div class="msg-avatar">{{ m.role === 'user' ? '我' : 'AI' }}</div>
+          <div class="msg-bubble">
+            <div class="msg-text" :class="{ typing: m.typing }" v-html="renderMessage(m.content)"></div>
+            <div v-if="m.tools && m.tools.length" class="msg-tools">
+              <span v-for="(t, ti) in m.tools" :key="ti" class="tool-chip">{{ toolLabel(t) }}</span>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="agentSending" class="msg-row assistant">
+          <div class="msg-avatar">AI</div>
+          <div class="msg-bubble"><span class="msg-loading">正在查询景点 / 生成路线 / 自检…</span></div>
+        </div>
+
+        <!-- 路线卡片：地图内嵌在 AI 消息区域内 -->
+        <div v-if="routeData" class="route-card">
+          <div class="route-summary">
+            <div><span class="k">总距离</span><span class="v">{{ formatDistance(routeData.total_distance) }} km</span></div>
+            <div><span class="k">景点数</span><span class="v">{{ routeData.route.length }}</span></div>
+            <div><span class="k">目标城市</span><span class="v">{{ routeData.target_city || targetCity }}</span></div>
+            <div><span class="k">起点</span><span class="v">{{ startSpotName }}</span></div>
+          </div>
+
+          <div v-if="routeData.tips" class="route-tips">{{ routeData.tips }}</div>
+
+          <el-tabs v-model="routeView" class="route-view-tabs" @tab-change="onRouteViewChange">
+            <el-tab-pane label="高德地图" name="map">
+              <div v-show="mapVisible" class="map-wrap">
+                <div ref="mapRef" class="plan-map"></div>
+                <div class="map-legend">
+                  <span class="legend-item"><i class="legend-dot legend-spot"></i>游览景点</span>
+                  <span class="legend-item"><i class="legend-dot legend-hotel"></i>周边酒店</span>
+                </div>
+              </div>
+              <div v-if="!mapVisible" class="map-fallback">
+                  <el-empty description="地图暂不可用，可切换到“路线示意图”查看" :image-size="60" />
+                  <div v-if="mapError" class="map-error">{{ mapError }}</div>
+                  <el-button size="small" @click="retryMap">重试加载地图</el-button>
+                </div>
+            </el-tab-pane>
+            <el-tab-pane label="路线示意图" name="chart">
+              <div ref="chartRef" class="plan-chart"></div>
+            </el-tab-pane>
+          </el-tabs>
+        </div>
+
+        <el-empty
+          v-if="!currentMessages.length && !routeData"
+          description="输入出行需求，Agent 会先查景点再生成路线"
+        />
+      </div>
+
+      <!-- 底部固定提问区（由左栏迁移而来，宽度与消息流对齐） -->
+      <div class="chat-composer">
+        <el-input
+          v-model="aiMessage"
+          type="textarea"
+          :rows="2"
+          resize="none"
+          maxlength="200"
+          placeholder="描述需求，例如：广州两天，喜欢爬山和美食"
+          @keydown.enter.exact.prevent="sendAgentMessage"
+        />
+        <el-button type="primary" class="composer-send" :loading="agentSending" @click="sendAgentMessage">
+          发送
+        </el-button>
+      </div>
+    </main>
+
+    <!-- ===== 右栏：Agent 工作台 ===== -->
+    <aside class="col-workbench">
+      <section class="wb-card">
+        <div class="wb-title">任务关键词</div>
+        <div class="wb-chips">
+          <span v-for="k in workbenchKeywords" :key="k" class="wb-chip">{{ k }}</span>
+          <span v-if="!workbenchKeywords.length" class="wb-empty">暂无</span>
+        </div>
+      </section>
+
+      <section class="wb-card">
+        <div class="wb-title">景点卡片</div>
+        <div class="card-list">
+          <div v-for="s in spotCards" :key="'s' + s.id" class="mini-card" @click="goSpotDetail(s.id)">
+            <div class="mini-name"><span class="mini-tag spot">景点</span>{{ s.name }}</div>
+            <div class="mini-meta">评分 {{ s.score ?? '-' }}</div>
+          </div>
+          <div v-if="!spotCards.length" class="wb-empty">生成路线后展示</div>
+        </div>
+      </section>
+
+      <section class="wb-card">
+        <div class="wb-title">酒店卡片</div>
+        <div class="card-list">
+          <div v-for="h in hotelCards" :key="'h' + h.id" class="mini-card" @click="goHotelDetail(h.id)">
+            <div class="mini-name"><span class="mini-tag hotel">酒店</span>{{ h.name }}</div>
+            <div class="mini-meta">¥{{ formatMoney(h.price) }}</div>
+          </div>
+          <div v-if="!hotelCards.length" class="wb-empty">暂无推荐酒店</div>
+        </div>
+      </section>
+
+      <el-button class="graph-btn" @click="openGraph">图谱可视化</el-button>
+    </aside>
+
+    <!-- 图谱弹窗 -->
+    <el-dialog v-model="graphVisible" title="知识图谱（关键词 / 景点 / 酒店）" width="760px">
+      <div ref="graphRef" class="graph-canvas"></div>
+    </el-dialog>
+
+    <!-- 原地图选点弹窗 -->
     <el-dialog v-model="mapDialogVisible" title="地图选点（回填位置与经纬度）" width="520px">
       <el-form label-width="80px">
         <el-form-item label="位置名称">
@@ -407,6 +365,9 @@ const routeView = ref('map')
 const mapRef = ref(null)
 // 地图仅在 SDK 加载成功且绘制成功时展示；任一环节失败（未配置 Key / 加载失败 / 驾车接口失败）都隐藏，保留文字路线
 const mapVisible = ref(false)
+// 地图失败原因（展示给用户，便于排查 Key/网络/容器问题）
+const mapError = ref('')
+let mapResizeObserver = null
 const chartRef = ref(null)
 let chartInstance = null
 let amapApi = null
@@ -811,23 +772,46 @@ const sendAgentMessage = async () => {
     const data = res.data || {}
     agentSessionId.value = data.session_id || agentSessionId.value
     const trace = Array.isArray(data.trace) ? data.trace : []
-    agentMessages.value.push({
+    // 本轮自检结果：用于消息内展示，并作为工作台“旅行提示”实体来源
+    lastSelfCheck.value = data.self_check || null
+    const fullReply = data.reply || '已处理'
+    const replyMsg = {
       role: 'assistant',
-      content: data.reply || '已处理',
-      tools: trace.map((t) => t.tool).filter((name, idx, arr) => arr.indexOf(name) === idx)
-    })
+      content: '',
+      full: fullReply,
+      typing: true,
+      tools: trace.map((t) => t.tool).filter((name, idx, arr) => arr.indexOf(name) === idx),
+      selfCheck: data.self_check || null,
+      conflicts: Array.isArray(data.conflicts) ? data.conflicts : [],
+      degraded: !!data.degraded
+    }
+    agentMessages.value.push(replyMsg)
     if (data.degraded) ElMessage.warning('AI 服务降级：已使用关键词解析')
 
-    const params = data.params || {}
-    if (params.target_city) {
-      applyAgentParams(params)
-      await handleGenerate()
+    // 任务标题取首条用户消息；更新任务时间
+    const task = currentTask.value
+    if (task) {
+      const firstUser = task.messages.find((m) => m.role === 'user')
+      task.title = (firstUser?.content || text).slice(0, 18)
+      task.updatedAt = nowLabel()
+      task.sessionId = agentSessionId.value
     }
+
+    const params = data.params || {}
+    // 路线生成与文字流式输出并行：文字逐字出现，路线卡片就绪后自动插入
+    const generatePromise = params.target_city
+      ? (applyAgentParams(params), handleGenerate({ intro: false }))
+      : Promise.resolve()
+    await typewriter(replyMsg, fullReply)
+    await generatePromise
+    if (task && params.target_city) task.routeData = routeData.value
+    scrollToBottom()
   } catch (e) {
-    agentMessages.value.push({ role: 'assistant', content: 'AI 助手暂时不可用，请重试或手动填写表单' })
+    agentMessages.value.push({ role: 'assistant', content: 'AI 助手暂时不可用，请重试或手动填写表单', tools: [] })
     ElMessage.error(extractError(e, 'AI 助手请求失败'))
   } finally {
     agentSending.value = false
+    scrollToBottom()
   }
 }
 
@@ -841,6 +825,237 @@ const newAgentChat = async () => {
   } catch (e) {
     // 清空失败不影响本地新对话
   }
+}
+
+// ===== 控制台布局：任务列表 / 工作台 / 实体高亮 / 图谱 =====
+const prefOpen = ref(false)
+const workbenchCollapsed = ref(false)
+const routeDetailOpen = ref(true)
+const messageListRef = ref(null)
+const graphVisible = ref(false)
+const graphRef = ref(null)
+const lastSelfCheck = ref(null)
+let graphInstance = null
+
+const nowLabel = () =>
+  new Date().toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+
+const makeTask = (title = '新的规划任务') => ({
+  id: `task-${Date.now()}-${Math.random().toString(16).slice(2, 6)}`,
+  title,
+  messages: [],
+  sessionId: '',
+  routeData: null,
+  updatedAt: nowLabel()
+})
+
+const tasks = ref([makeTask()])
+const currentTaskId = ref(tasks.value[0].id)
+const currentTask = computed(
+  () => tasks.value.find((t) => t.id === currentTaskId.value) || tasks.value[0]
+)
+const currentMessages = computed(() => currentTask.value?.messages || [])
+// 重要：agentMessages 直接绑定当前任务的 messages 数组，保证原有 push 逻辑自动同步
+agentMessages.value = currentTask.value.messages
+
+const prefSummary = computed(() => {
+  const pref = (preferences.value || []).join('/') || '未选偏好'
+  const city = targetCity.value?.trim() || '未选城市'
+  return `${city} · ${days.value}天 · 每天${perDay.value}个 · ${pref}`
+})
+
+// 工作台：关键词 / 实体 / 卡片
+const spotCards = computed(() =>
+  (routeData.value?.route || []).map((r) => ({
+    id: r.id,
+    name: r.name,
+    score: r.score,
+    city: r.city
+  }))
+)
+const hotelCards = computed(() =>
+  (routeData.value?.hotel_markers || []).map((h) => ({
+    id: h.id,
+    name: h.name,
+    price: h.price,
+    address: h.address
+  }))
+)
+const workbenchKeywords = computed(() => {
+  const set = new Set()
+  if (targetCity.value) set.add(targetCity.value.trim())
+  ;(preferences.value || []).forEach((p) => set.add(p))
+  if (travelType.value) set.add(travelType.value)
+  set.add(`${days.value}天`)
+  set.add(`每天${perDay.value}个`)
+  return Array.from(set).slice(0, 10)
+})
+const workbenchEntities = computed(() => {
+  const list = []
+  spotCards.value.forEach((s) =>
+    list.push({ key: `spot-${s.id}`, type: 'spot', typeLabel: '景点', name: s.name, id: s.id })
+  )
+  hotelCards.value.forEach((h) =>
+    list.push({ key: `hotel-${h.id}`, type: 'hotel', typeLabel: '酒店', name: h.name, id: h.id })
+  )
+  ;((lastSelfCheck.value?.issues_text) || []).slice(0, 2).forEach((text, i) =>
+    list.push({ key: `tip-${i}`, type: 'tip', typeLabel: '提示', name: text, id: null })
+  )
+  return list
+})
+
+// 实体高亮：把文本中的景点/酒店名包成带下划线的 span（先转义再替换，避免 XSS）
+const escapeHtml = (text) =>
+  String(text || '').replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]))
+const escapeReg = (text) => String(text).replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+const renderMessage = (text) => {
+  const safe = escapeHtml(text)
+  const names = [...spotCards.value.map((s) => s.name), ...hotelCards.value.map((h) => h.name)]
+    .filter(Boolean)
+    .sort((a, b) => b.length - a.length)
+    .slice(0, 80)
+  let html = safe
+  if (names.length) {
+    const pattern = new RegExp(`(${names.map(escapeReg).join('|')})`, 'g')
+    html = html.replace(pattern, '<span class="entity-hl">$1</span>')
+  }
+  // 轻量清洗模型偶发的 Markdown 标记，避免页面出现 #、** 等符号
+  html = html
+    .replace(/^\s*#{1,6}\s*/gm, '')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/^\s*[-*]\s+/gm, '• ')
+  return html.replace(/\n/g, '<br/>')
+}
+
+const TOOL_LABELS = {
+  search_spots: '查景点',
+  make_route: '生成路线',
+  critique_route: '路线自检',
+  search_hotels: '查酒店',
+  search_knowledge: '知识检索',
+  degraded: '关键词解析'
+}
+const toolLabel = (name) => TOOL_LABELS[name] || name
+
+const scrollToBottom = async () => {
+  await nextTick()
+  if (messageListRef.value) messageListRef.value.scrollTop = messageListRef.value.scrollHeight
+}
+
+// 打字机效果：把完整回复逐字写入消息，形成“从上往下生成”的流式观感
+const typewriter = (msg, full) =>
+  new Promise((resolve) => {
+    msg.content = ''
+    msg.typing = true
+    let i = 0
+    const tick = () => {
+      i = Math.min(full.length, i + 2 + Math.floor(Math.random() * 2))
+      msg.content = full.slice(0, i)
+      if (i % 24 === 0) scrollToBottom()
+      if (i < full.length) {
+        setTimeout(tick, 14)
+      } else {
+        msg.typing = false
+        scrollToBottom()
+        resolve()
+      }
+    }
+    tick()
+  })
+
+const switchTask = (id) => {
+  if (id === currentTaskId.value) return
+  // 保存当前会话状态到旧任务
+  const old = currentTask.value
+  if (old) {
+    old.sessionId = agentSessionId.value
+    old.routeData = routeData.value
+  }
+  currentTaskId.value = id
+  const task = currentTask.value
+  agentMessages.value = task.messages
+  agentSessionId.value = task.sessionId || ''
+  routeData.value = task.routeData || null
+  scrollToBottom()
+  // 切回历史任务时重绘地图/示意图（地图容器随路线卡片重新挂载）
+  if (routeData.value) {
+    nextTick(() => {
+      renderRouteMap()
+      renderRouteChart()
+    })
+  }
+}
+
+const createTask = async () => {
+  const sid = agentSessionId.value
+  if (sid) {
+    try {
+      await api.post('/api/v1/ai/agent/reset', { session_id: sid })
+    } catch (e) {
+      // 清空失败不影响本地新任务
+    }
+  }
+  const task = makeTask()
+  tasks.value.unshift(task)
+  currentTaskId.value = task.id
+  agentMessages.value = task.messages
+  agentSessionId.value = ''
+  routeData.value = null
+  hasGeneratedRoute.value = false
+  lastSelfCheck.value = null
+}
+
+const goSpotDetail = (id) => {
+  if (id) router.push(`/spot-detail/${id}`)
+}
+
+const openEntity = (entity) => {
+  if (entity.type === 'spot') goSpotDetail(entity.id)
+  else if (entity.type === 'hotel') goHotelDetail(entity.id)
+}
+
+// 图谱可视化：关键词为中心，连接景点/酒店实体
+const buildGraph = () => {
+  if (!graphRef.value) return
+  if (!graphInstance) graphInstance = echarts.init(graphRef.value)
+  const nodes = []
+  const links = []
+  const keywordNodes = workbenchKeywords.value.slice(0, 5)
+  keywordNodes.forEach((k, i) => {
+    nodes.push({ id: `k${i}`, name: k, category: 0, symbolSize: 34 })
+  })
+  spotCards.value.slice(0, 8).forEach((s, i) => {
+    nodes.push({ id: `s${i}`, name: s.name, category: 1, symbolSize: 26 })
+    if (keywordNodes.length) links.push({ source: `k${i % keywordNodes.length}`, target: `s${i}` })
+  })
+  hotelCards.value.slice(0, 6).forEach((h, i) => {
+    nodes.push({ id: `h${i}`, name: h.name, category: 2, symbolSize: 22 })
+    if (keywordNodes.length) links.push({ source: `k${i % keywordNodes.length}`, target: `h${i}` })
+  })
+  graphInstance.setOption({
+    backgroundColor: 'transparent',
+    legend: [{ data: ['关键词', '景点', '酒店'], textStyle: { color: '#c7d2da' }, top: 0 }],
+    series: [
+      {
+        type: 'graph',
+        layout: 'force',
+        roam: true,
+        label: { show: true, color: '#e6edf3', fontSize: 11 },
+        force: { repulsion: 220, edgeLength: 90 },
+        categories: [{ name: '关键词' }, { name: '景点' }, { name: '酒店' }],
+        data: nodes,
+        links,
+        lineStyle: { color: '#3b4a55', width: 1 }
+      }
+    ]
+  })
+  graphInstance.resize()
+}
+
+const openGraph = async () => {
+  graphVisible.value = true
+  await nextTick()
+  buildGraph()
 }
 
 // 只读汇总：从当前路线结果拼出给 AI 说明用的精简摘要（不改动 routeData / timelineItems）
@@ -878,7 +1093,31 @@ const aiExplainRoute = async () => {
   }
 }
 
-const handleGenerate = async () => {
+// 偏好面板直接生成路线后：按路线景点请求 AI 介绍，并以打字机形式追加到对话区
+const pushSpotIntro = async (data) => {
+  const names = (data?.route || []).map((r) => r.name).filter(Boolean).slice(0, 6)
+  if (!names.length) return
+  const msg = { role: 'assistant', content: '', typing: true, tools: ['景点介绍'] }
+  agentMessages.value.push(msg)
+  const task = currentTask.value
+  if (task && (!task.title || task.title === '新的规划任务')) {
+    task.title = `${targetCity.value || '路线'} · ${days.value} 天`
+  }
+  try {
+    const res = await api.post('/api/v1/ai/spots/intro', { spot_names: names }, { timeout: 60000 })
+    await typewriter(msg, res.data?.note || '暂无景点介绍')
+  } catch (e) {
+    msg.typing = false
+    msg.content = '景点介绍生成失败，可稍后重试'
+  }
+  if (task) {
+    task.updatedAt = nowLabel()
+    task.routeData = routeData.value
+  }
+  scrollToBottom()
+}
+
+const handleGenerate = async (options = {}) => {
   // 新一轮生成开始前清掉旧的 AI 说明，避免展示过期内容
   aiNote.value = ''
   aiNoteLoading.value = false
@@ -929,10 +1168,15 @@ const handleGenerate = async () => {
       ElMessage.warning('暂无匹配酒店，可放宽筛选条件')
     }
     fillBookingDates(res.data?.budget?.days ?? days.value)
+    // 新路线默认展示地图 Tab，避免停留在“示意图”导致地图看起来没渲染
+    routeView.value = 'map'
+    await nextTick()
     await nextTick()
     await renderRouteMap()
     renderRouteChart()
     savePlanCache()
+    // 偏好面板直接生成路线时，补一段 AI 景点介绍（对话区不再空白）
+    if (options.intro !== false) await pushSpotIntro(res.data)
     // 成功生成后补充 AI 行程说明（仅当本次参数来自 AI 解析）
     await aiExplainRoute()
   } catch (e) {
@@ -1250,7 +1494,18 @@ const clearMapOverlays = () => {
   mapOverlays = []
 }
 
+const retryMap = () => {
+  mapError.value = ''
+  mapVisible.value = false
+  mapDirty = true
+  nextTick(() => renderRouteMap())
+}
+
 const destroyMap = () => {
+  if (mapResizeObserver) {
+    mapResizeObserver.disconnect()
+    mapResizeObserver = null
+  }
   clearMapOverlays()
   if (mapInstance) {
     mapInstance.destroy()
@@ -1418,9 +1673,33 @@ const renderRouteMap = async () => {
     amapApi = amapApi || (await loadAMap())
     if (token !== mapRenderToken) return
     mapVisible.value = true
+    mapError.value = ''
     await nextTick()
-    if (token !== mapRenderToken || !mapRef.value) return
+    // 容器可能未挂载或宽度为 0：最多等待 ~1s
+    for (let i = 0; i < 20; i++) {
+      if (token !== mapRenderToken) return
+      if (mapRef.value && mapRef.value.clientWidth > 0) break
+      await new Promise((r) => setTimeout(r, 50))
+      await nextTick()
+    }
+    if (token !== mapRenderToken || !mapRef.value) {
+      mapError.value = '地图容器未就绪（DOM 缺失），请刷新后重试'
+      console.warn('[Plan] 地图容器未就绪，跳过本次渲染')
+      return
+    }
+    if (mapRef.value.clientWidth === 0) {
+      mapError.value = '地图容器宽度为 0（布局未完成），请点击重试'
+      console.warn('[Plan] 地图容器宽度为 0')
+      return
+    }
     if (!mapInstance) {
+      if (mapResizeObserver) mapResizeObserver.disconnect()
+      if (typeof ResizeObserver !== 'undefined') {
+        mapResizeObserver = new ResizeObserver(() => {
+          if (mapInstance) mapInstance.resize()
+        })
+        mapResizeObserver.observe(mapRef.value)
+      }
       mapInstance = new amapApi.Map(mapRef.value, {
         zoom: 11,
         center: [anchorPoint.lng, anchorPoint.lat],
@@ -1484,10 +1763,15 @@ const renderRouteMap = async () => {
     // 高德返回的里程全部丢弃，只用它画轨迹
     if (!ok) throw new Error('驾车路线请求失败')
     mapInstance.setFitView(null, false, [60, 60, 80, 60])
+    // 布局是 flex + 滚动容器，初始化后补一次 resize，避免宽度按 0 计算导致空白
+    setTimeout(() => {
+      if (mapInstance && token === mapRenderToken) mapInstance.resize()
+    }, 60)
     mapDirty = false
   } catch (e) {
     console.warn('[Plan] 高德地图渲染失败，已隐藏地图:', e?.message || e)
     if (token === mapRenderToken) {
+      mapError.value = String(e?.message || e || '地图渲染失败')
       destroyMap()
       mapDirty = false
     }
@@ -2369,4 +2653,780 @@ onBeforeUnmount(() => {
   color: #b0b3b8;
   font-size: 12px;
 }
+
+/* ===================== 白底三栏布局（v1.5） ===================== */
+.layout3 {
+  display: flex;
+  gap: 12px;
+  padding: 12px;
+  height: calc(100vh - 88px);
+  min-height: 620px;
+  background: #ffffff;
+  box-sizing: border-box;
+}
+
+/* ---------- 左栏：Agent 任务 ---------- */
+.col-tasks {
+  width: 260px;
+  flex: 0 0 260px;
+  display: flex;
+  flex-direction: column;
+  background: #fffaf7;
+  border: 1px solid #f3e6dc;
+  border-radius: 14px;
+  padding: 12px;
+  box-sizing: border-box;
+}
+
+.tasks-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f5e7dd;
+}
+
+.tasks-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: #374151;
+}
+
+.tasks-add {
+  background: #fff !important;
+  border-color: #ffd9c2 !important;
+  color: #ff7a45 !important;
+}
+
+.task-list {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 10px 0;
+}
+
+.task-item {
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #fff;
+  border: 1px solid #f3e6dc;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.task-item:hover {
+  box-shadow: 0 2px 10px rgba(255, 122, 69, 0.1);
+}
+
+.task-item.active {
+  border-color: #ffb08a;
+  background: #fff5ef;
+}
+
+.task-name {
+  color: #374151;
+  font-size: 13px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.task-sub {
+  margin-top: 4px;
+  color: #9aa3b2;
+  font-size: 11px;
+}
+
+/* 底部固定提问区：与消息流左右留白一致，不撑满屏幕 */
+.chat-composer {
+  flex: 0 0 auto;
+  display: flex;
+  gap: 10px;
+  align-items: flex-end;
+  padding: 12px 16px 14px;
+  border-top: 1px solid #f5e7dd;
+  background: #fff;
+}
+
+.chat-composer :deep(.el-textarea) {
+  flex: 1;
+  min-width: 0;
+}
+
+.chat-composer :deep(.el-textarea__inner) {
+  border-radius: 12px;
+  background: #fffaf7;
+  box-shadow: 0 0 0 1px #f3e0d5 inset;
+  font-size: 13px;
+  padding: 10px 12px;
+}
+
+.chat-composer .composer-send {
+  width: 96px;
+  height: 56px;
+  flex: 0 0 96px;
+  border-radius: 12px;
+  background: #ff7a45;
+  border-color: #ff7a45;
+  font-weight: 600;
+}
+
+/* ---------- 中栏：主对话区 ---------- */
+.col-chat {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  background: #fff;
+  border: 1px solid #f3e6dc;
+  border-radius: 14px;
+  overflow: hidden;
+}
+
+.chat-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding: 12px 16px 8px;
+}
+
+.chat-title {
+  font-size: 18px;
+  font-weight: 700;
+  color: #1f2937;
+}
+
+.chat-sub {
+  margin-top: 3px;
+  font-size: 12px;
+  color: #9aa3b2;
+}
+
+.chat-new {
+  color: #ff7a45 !important;
+}
+
+.chat-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-bottom: 1px solid #f5e7dd;
+  flex-wrap: wrap;
+}
+
+.chat-toolbar .el-button {
+  border-radius: 8px;
+}
+
+.plan-name-input {
+  width: 180px;
+  margin-left: auto;
+}
+
+/* 偏好快照一行 */
+.pref-bar {
+  border-bottom: 1px solid #f5e7dd;
+  background: #fffdfb;
+}
+
+.pref-line {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 16px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.pref-title {
+  color: #374151;
+  font-weight: 600;
+}
+
+.pref-summary {
+  flex: 1;
+  color: #9aa3b2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.pref-toggle {
+  color: #ff7a45;
+}
+
+.pref-body {
+  padding: 4px 16px 14px;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.pref-grid {
+  display: flex;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.pref-field {
+  flex: 1;
+  min-width: 200px;
+  margin-bottom: 10px;
+}
+
+.pref-field--num {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.field-label {
+  font-size: 12px;
+  color: #6b7280;
+  margin-bottom: 6px;
+}
+
+.start-location-row {
+  display: flex;
+  gap: 8px;
+}
+
+.coord-tip {
+  margin-top: 4px;
+  font-size: 11px;
+  color: #9aa3b2;
+}
+
+.type-group :deep(.el-radio-button__inner),
+.pref-group :deep(.el-checkbox-button__inner) {
+  border-radius: 8px;
+  margin-right: 6px;
+}
+
+.pref-group :deep(.el-checkbox-button.is-checked .el-checkbox-button__inner),
+.type-group :deep(.el-radio-button.is-active .el-radio-button__inner) {
+  background: #ff7a45;
+  border-color: #ff7a45;
+  box-shadow: -1px 0 0 0 #ff7a45;
+}
+
+.booking-block {
+  margin-top: 6px;
+  padding: 10px;
+  border: 1px dashed #f0ddd2;
+  border-radius: 10px;
+}
+
+/* 消息流滚动区 */
+.chat-flow {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 14px 16px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.msg-row {
+  display: flex;
+  gap: 10px;
+  align-items: flex-start;
+}
+
+.msg-row.user {
+  flex-direction: row-reverse;
+}
+
+.msg-avatar {
+  width: 30px;
+  height: 30px;
+  flex: 0 0 30px;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  font-weight: 600;
+  color: #fff;
+  background: #ff7a45;
+}
+
+.msg-row.user .msg-avatar {
+  background: #94a3b8;
+}
+
+.msg-bubble {
+  max-width: 78%;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #f8f8fa;
+  border: 1px solid #eef0f3;
+  color: #374151;
+  font-size: 13px;
+  line-height: 1.75;
+  word-break: break-word;
+}
+
+.msg-row.user .msg-bubble {
+  background: #fff5ef;
+  border-color: #ffd9c2;
+  color: #4b2e1e;
+}
+
+.msg-text :deep(.entity-hl) {
+  color: #ff7a45;
+  border-bottom: 1px dashed #ffb08a;
+  cursor: help;
+}
+
+.msg-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.tool-chip {
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: #f3f4f6;
+  border: 1px solid #e5e7eb;
+  color: #6b7280;
+  font-size: 11px;
+}
+
+.msg-check {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #eceff3;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 11px;
+}
+
+.check-score {
+  color: #16a34a;
+}
+
+.check-issues {
+  color: #d97706;
+}
+
+.msg-conflict {
+  margin-top: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fff7e6;
+  border: 1px solid #ffe0a3;
+  color: #b45309;
+  font-size: 12px;
+}
+
+.msg-degraded {
+  margin-top: 6px;
+  color: #d97706;
+  font-size: 11px;
+}
+
+.msg-loading {
+  color: #9aa3b2;
+}
+
+/* 路线卡片 */
+.route-card {
+  background: #fff;
+  border: 1px solid #f3e6dc;
+  border-radius: 14px;
+  padding: 12px;
+  box-shadow: 0 4px 16px rgba(31, 41, 55, 0.04);
+}
+
+.route-summary {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 14px;
+  padding-bottom: 10px;
+  border-bottom: 1px solid #f3f4f6;
+}
+
+.route-summary .k {
+  color: #9aa3b2;
+  font-size: 11px;
+  margin-right: 4px;
+}
+
+.route-summary .v {
+  color: #111827;
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.route-fold-head {
+  display: flex;
+  justify-content: space-between;
+  margin-top: 10px;
+  padding: 6px 0;
+  color: #6b7280;
+  font-size: 12px;
+  cursor: pointer;
+  border-bottom: 1px dashed #f0e2d9;
+}
+
+.fold-hint {
+  color: #ff7a45;
+}
+
+.route-tips {
+  margin-top: 8px;
+  padding: 6px 10px;
+  border-radius: 8px;
+  background: #fff7e6;
+  border: 1px solid #ffe0a3;
+  color: #b45309;
+  font-size: 12px;
+}
+
+.route-detail {
+  padding-top: 6px;
+}
+
+.timeline-title {
+  color: #374151;
+}
+
+.timeline-meta {
+  color: #9aa3b2;
+}
+
+.timeline-connector {
+  background: #f0e2d9;
+}
+
+.timeline-dot.spot {
+  background: #ff7a45;
+}
+
+.timeline-dot.hotel {
+  background: #3b82f6;
+}
+
+.hotel-item {
+  background: #fffaf7;
+  border: 1px solid #f6e7dd;
+}
+
+.hotel-item-name {
+  color: #374151;
+}
+
+.hotel-item-addr,
+.hotel-empty {
+  color: #9aa3b2;
+}
+
+.hotel-item-price {
+  color: #ff7a45;
+}
+
+.map-wrap {
+  position: relative;
+  border-radius: 10px;
+  overflow: hidden;
+  border: 1px solid #f3e6dc;
+}
+
+.plan-map {
+  width: 100%;
+  height: 320px;
+}
+
+.map-legend {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
+  display: flex;
+  gap: 12px;
+  padding: 4px 10px;
+  border-radius: 999px;
+  background: #ffffffdd;
+  border: 1px solid #f3e6dc;
+  font-size: 11px;
+  color: #6b7280;
+}
+
+.legend-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-right: 4px;
+}
+
+.legend-spot {
+  background: #ff7a45;
+}
+
+.legend-hotel {
+  background: #2f9cff;
+}
+
+.plan-chart {
+  width: 100%;
+  height: 320px;
+}
+
+/* ---------- 右栏：Agent 工作台 ---------- */
+.col-workbench {
+  width: 300px;
+  flex: 0 0 300px;
+  background: #fff;
+  border: 1px solid #f3e6dc;
+  border-radius: 14px;
+  padding: 12px;
+  box-sizing: border-box;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.wb-card {
+  background: #fffaf7;
+  border: 1px solid #f6e7dd;
+  border-radius: 10px;
+  padding: 10px;
+}
+
+.wb-title {
+  color: #6b7280;
+  font-size: 12px;
+  margin-bottom: 8px;
+}
+
+.wb-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.wb-chip {
+  padding: 2px 8px;
+  border-radius: 999px;
+  background: #fff1e8;
+  color: #ff7a45;
+  font-size: 11px;
+}
+
+.wb-empty {
+  color: #9aa3b2;
+  font-size: 11px;
+}
+
+.entity-list {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  max-height: 180px;
+  overflow-y: auto;
+}
+
+.entity-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #f3e6dc;
+  cursor: pointer;
+  transition: box-shadow 0.2s;
+}
+
+.entity-item:hover {
+  box-shadow: 0 2px 8px rgba(255, 122, 69, 0.12);
+}
+
+.entity-type {
+  padding: 1px 6px;
+  border-radius: 6px;
+  font-size: 10px;
+  background: #fff1e8;
+  color: #ff7a45;
+}
+
+.entity-type.hotel {
+  background: #eef6ff;
+  color: #2563eb;
+}
+
+.entity-type.tip {
+  background: #fff7e6;
+  color: #b45309;
+}
+
+.entity-name {
+  color: #374151;
+  font-size: 12px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.card-list {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.mini-card {
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: #fff;
+  border: 1px solid #f3e6dc;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.mini-card:hover {
+  box-shadow: 0 2px 10px rgba(255, 122, 69, 0.12);
+  border-color: #ffb08a;
+}
+
+.mini-name {
+  color: #374151;
+  font-size: 12px;
+}
+
+.mini-meta {
+  margin-top: 4px;
+  color: #9aa3b2;
+  font-size: 11px;
+}
+
+.graph-btn {
+  margin-top: auto;
+  background: #ff7a45 !important;
+  border-color: #ff7a45 !important;
+  color: #fff !important;
+  border-radius: 10px;
+}
+
+.graph-canvas {
+  width: 100%;
+  height: 520px;
+  background: #fff;
+  border-radius: 10px;
+}
+
+/* 窄屏适配 */
+@media (max-width: 1280px) {
+  .col-tasks {
+    width: 220px;
+    flex-basis: 220px;
+  }
+  .col-workbench {
+    width: 240px;
+    flex-basis: 240px;
+  }
+}
+
+@media (max-width: 1024px) {
+  .layout3 {
+    flex-wrap: wrap;
+    height: auto;
+  }
+  .col-tasks,
+  .col-workbench {
+    width: 100%;
+    flex-basis: 100%;
+  }
+  .chat-flow {
+    max-height: 60vh;
+  }
+}
+
+
+/* ===== 中间栏结果流下移（v1.6） ===== */
+/* 标题与按钮区下方留白 */
+.col-chat .chat-head {
+  padding-top: 16px;
+  padding-bottom: 12px;
+}
+
+.col-chat .chat-toolbar {
+  padding-bottom: 10px;
+}
+
+/* 偏好快照与消息流之间再留出一段距离 */
+.col-chat .pref-bar {
+  margin-bottom: 6px;
+}
+
+/* 滚动容器：顶部留白，聚焦下方结果 */
+.col-chat .chat-flow {
+  padding-top: 28px;
+}
+
+/* 可伸缩留白：内容少时把消息压到中下部，内容多时自动收起为 0 */
+.chat-lead {
+  flex: 1 0 auto;
+  min-height: 12px;
+}
+
+/* 内容较多时保证从顶部正常开始滚动，不被留白挤压 */
+.chat-flow > .msg-row:first-of-type,
+.chat-flow > .route-card:first-of-type {
+  flex-shrink: 0;
+}
+
+
+/* 流式输出光标 */
+.msg-text.typing::after {
+  content: '▍';
+  display: inline-block;
+  margin-left: 2px;
+  color: #ff7a45;
+  animation: caret-blink 0.9s steps(2, start) infinite;
+}
+
+@keyframes caret-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+
+/* 卡片类型标签：景点橙 / 酒店蓝 */
+.mini-tag {
+  display: inline-block;
+  padding: 0 5px;
+  margin-right: 6px;
+  border-radius: 4px;
+  font-size: 10px;
+  line-height: 16px;
+  border: 1px solid transparent;
+  vertical-align: middle;
+}
+
+.mini-tag.spot {
+  background: #fff1e8;
+  color: #ff7a45;
+  border-color: #ffd2b8;
+}
+
+.mini-tag.hotel {
+  background: #eef6ff;
+  color: #2563eb;
+  border-color: #c7e0ff;
+}
+
+
+.map-fallback { display: flex; flex-direction: column; align-items: center; gap: 8px; padding: 8px 0; }
+.map-error { max-width: 92%; font-size: 12px; color: #b45309; background: #fff7e6;
+  border: 1px solid #ffe0a3; border-radius: 8px; padding: 6px 10px; word-break: break-all; }
+
 </style>

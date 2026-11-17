@@ -103,3 +103,13 @@ class AgentPlanResponse(BaseModel):
 
 class AgentResetRequest(BaseModel):
     session_id: str
+
+
+class SpotIntroRequest(BaseModel):
+    """按景点名生成介绍文本（偏好面板直接生成路线后使用）。"""
+    spot_names: List[str] = Field(default_factory=list)
+
+
+class SpotIntroResponse(BaseModel):
+    note: str = ""
+    degraded: bool = False
