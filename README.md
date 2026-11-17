@@ -67,6 +67,42 @@
 
 ---
 
+## Docker 一键启动（推荐体验）
+
+前置：安装 Docker Desktop（Windows/macOS）或 Docker Engine + Compose。
+
+```bash
+# 1. 配置环境变量（可留空，AI 会自动降级）
+cp .env.docker.example .env      # Windows: copy .env.docker.example .env
+
+# 2. 构建并启动（MySQL + 后端 + 前端）
+docker compose up -d --build
+```
+
+| 服务 | 地址 |
+|---|---|
+| 前端 | http://localhost:8080 |
+| 后端 API 文档 | http://localhost:8000/docs |
+| MySQL（宿主机端口） | 127.0.0.1:3307（容器内 3306） |
+
+说明：
+- 启动时自动执行 `scripts/create_tables.py` 建表，**数据库初始为空**；
+- 导入演示数据（需在容器内执行，部分脚本依赖高德 Key / Excel）：
+  ```bash
+  docker compose exec backend python scripts/import_guangzhou_spots.py
+  docker compose exec backend python scripts/add_guangzhou_hotels.py
+  docker compose exec backend python scripts/seed_review_users.py
+  ```
+- 构建 RAG 索引：
+  ```bash
+  docker compose exec backend python scripts/build_rag_index.py
+  ```
+- 停止 / 清理：
+  ```bash
+  docker compose down          # 保留数据库数据
+  docker compose down -v       # 同时删除数据卷
+  ```
+
 ## 快速开始
 
 ### 1. 数据库
