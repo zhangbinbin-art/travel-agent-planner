@@ -762,14 +762,13 @@ const sendAgentMessage = async () => {
     }
 
     const params = data.params || {}
-    // 路线生成与文字流式输出并行：文字逐字出现，路线卡片就绪后自动插入
-    const generatePromise = params.target_city
-      ? (applyAgentParams(params), handleGenerate({ intro: false }))
-      : Promise.resolve()
+    // 先流式输出文字；文字结束后再生成路线（地图最后出现）
     await typewriter(replyMsg, fullReply)
-    await generatePromise
-    if (task && params.target_city) task.routeData = routeData.value
-    scrollToBottom()
+    if (params.target_city) {
+      applyAgentParams(params)
+      await handleGenerate({ intro: false })
+      if (task) task.routeData = routeData.value
+    }
   } catch (e) {
     agentMessages.value.push({ role: 'assistant', content: 'AI 助手暂时不可用，请重试或手动填写表单', tools: [] })
     ElMessage.error(extractError(e, 'AI 助手请求失败'))
@@ -915,12 +914,11 @@ const typewriter = (msg, full) =>
     const tick = () => {
       i = Math.min(full.length, i + 2 + Math.floor(Math.random() * 2))
       msg.content = full.slice(0, i)
-      if (i % 24 === 0) scrollToBottom()
+      // 输出过程中不自动滚动页面，避免视觉上“被拽着走”
       if (i < full.length) {
         setTimeout(tick, 14)
       } else {
         msg.typing = false
-        scrollToBottom()
         resolve()
       }
     }
@@ -1078,7 +1076,6 @@ const pushSpotIntro = async (data) => {
     task.updatedAt = nowLabel()
     task.routeData = routeData.value
   }
-  scrollToBottom()
 }
 
 const handleGenerate = async (options = {}) => {
@@ -1672,6 +1669,14 @@ const renderRouteMap = async () => {
         scrollWheel: true,
         doubleClickZoom: true
       })
+      // 高德 SDK 加载成功但 Key/安全密钥异常时不会抛错，只会一直白屏
+      window.__mapReady = false
+      mapInstance.on('complete', () => { window.__mapReady = true })
+      setTimeout(() => {
+        if (!window.__mapReady) {
+          mapError.value = '地图加载超时：请检查高德 Key / 安全密钥是否授权当前域名'
+        }
+      }, 3000)
     }
     if (!mapInfoWindow) {
       mapInfoWindow = new amapApi.InfoWindow({ offset: new amapApi.Pixel(0, -32), isCustom: false })
