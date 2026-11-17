@@ -23,7 +23,15 @@
 ### 管理端
 - 景点 / 酒店 / 用户 / 内容 / 商家审核管理、数据概览
 
-> 截图占位：可放到 `docs/screenshots/`，在 README 中引用（`![](docs/screenshots/plan.png)`）
+### 界面预览
+
+| AI 行程助手（规划页） | 生成路线与地图 |
+|---|---|
+| ![](docs/screenshots/plan-empty.png) | ![](docs/screenshots/plan-route.png) |
+
+首页：
+
+![](docs/screenshots/home.png)
 
 ---
 
