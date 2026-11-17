@@ -55,3 +55,9 @@ backend/data/rag/
 
 # Agent 会话落盘（运行时数据，可删除）
 backend/data/agent_sessions/
+
+# 非代码资料（论文/说明/图片），不纳入仓库
+README/
+bishe_titles.txt
+使用说明.txt
+毕业设计AI.cmd
