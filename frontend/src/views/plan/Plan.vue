@@ -123,19 +123,8 @@
           <div v-if="routeData.tips" class="route-tips">{{ routeData.tips }}</div>
 
           <el-tabs v-model="routeView" class="route-view-tabs" @tab-change="onRouteViewChange">
-            <el-tab-pane label="高德地图" name="map">
-              <div v-show="mapVisible" class="map-wrap">
-                <div ref="mapRef" class="plan-map"></div>
-                <div class="map-legend">
-                  <span class="legend-item"><i class="legend-dot legend-spot"></i>游览景点</span>
-                  <span class="legend-item"><i class="legend-dot legend-hotel"></i>周边酒店</span>
-                </div>
-              </div>
-              <div v-if="!mapVisible" class="map-fallback">
-                  <el-empty description="地图暂不可用，可切换到“路线示意图”查看" :image-size="60" />
-                  <div v-if="mapError" class="map-error">{{ mapError }}</div>
-                  <el-button size="small" @click="retryMap">重试加载地图</el-button>
-                </div>
+            <el-tab-pane label="路线地图" name="map">
+              <RouteLeafletMap v-if="routeData" :spots="mapSpotPoints" :hotels="mapHotelPoints" />
             </el-tab-pane>
             <el-tab-pane label="路线示意图" name="chart">
               <div ref="chartRef" class="plan-chart"></div>
@@ -257,7 +246,7 @@ import { saveTrip } from '@/api/trip'
 import { createHotelOrder } from '@/api/hotel'
 import { auth } from '@/utils/auth'
 import HotelPicker from '@/components/hotel/HotelPicker.vue'
-import { loadAMap } from '@/utils/amap'
+import RouteLeafletMap from '@/components/RouteLeafletMap.vue'
 
 defineOptions({ name: 'Plan' })
 
@@ -1023,6 +1012,10 @@ const openEntity = (entity) => {
   else if (entity.type === 'hotel') goHotelDetail(entity.id)
 }
 
+// 传给 Leaflet 地图的点位（复用原有坐标构建逻辑）
+const mapSpotPoints = computed(() => buildSpotPoints(routeData.value))
+const mapHotelPoints = computed(() => buildHotelPoints(routeData.value))
+
 // 图谱可视化：关键词为中心，连接景点/酒店实体
 const buildGraph = () => {
   if (!graphRef.value) return
@@ -1660,138 +1653,10 @@ const drawDrivingRoute = (points) =>
     })
   })
 
+// 地图已改为 Leaflet 组件（不依赖高德 JS SDK / Key），保留空实现兼容旧调用
 const renderRouteMap = async () => {
-  const token = ++mapRenderToken
-  clearMapOverlays()
-  // 每次刷新先清空所有 marker / 折线，再按两类点位分别渲染
-  const spotPoints = buildSpotPoints(routeData.value)
-  const hotelPoints = buildHotelPoints(routeData.value)
-  const anchorPoint = spotPoints[0] || hotelPoints[0]
-  if (!anchorPoint) {
-    destroyMap()
-    mapDirty = false
-    return
-  }
-  // 地图 Tab 未激活时先挂起，避免在 0 尺寸容器里初始化
-  if (routeView.value !== 'map') {
-    mapDirty = true
-    return
-  }
-  try {
-    amapApi = amapApi || (await loadAMap())
-    if (token !== mapRenderToken) return
-    mapVisible.value = true
-    mapError.value = ''
-    await nextTick()
-    // 容器可能未挂载或宽度为 0：最多等待 ~1s
-    for (let i = 0; i < 20; i++) {
-      if (token !== mapRenderToken) return
-      if (mapRef.value && mapRef.value.clientWidth > 0) break
-      await new Promise((r) => setTimeout(r, 50))
-      await nextTick()
-    }
-    if (token !== mapRenderToken || !mapRef.value) {
-      mapError.value = '地图容器未就绪（DOM 缺失），请刷新后重试'
-      console.warn('[Plan] 地图容器未就绪，跳过本次渲染')
-      return
-    }
-    if (mapRef.value.clientWidth === 0) {
-      mapError.value = '地图容器宽度为 0（布局未完成），请点击重试'
-      console.warn('[Plan] 地图容器宽度为 0')
-      return
-    }
-    if (!mapInstance) {
-      if (mapResizeObserver) mapResizeObserver.disconnect()
-      if (typeof ResizeObserver !== 'undefined') {
-        mapResizeObserver = new ResizeObserver(() => {
-          if (mapInstance) mapInstance.resize()
-        })
-        mapResizeObserver.observe(mapRef.value)
-      }
-      mapInstance = new amapApi.Map(mapRef.value, {
-        zoom: 11,
-        center: [anchorPoint.lng, anchorPoint.lat],
-        resizeEnable: true,
-        dragEnable: true,
-        scrollWheel: true,
-        doubleClickZoom: true
-      })
-      // 高德 SDK 加载成功但 Key/安全密钥异常时不会抛错，只会一直白屏
-      window.__mapReady = false
-      mapInstance.on('complete', () => { window.__mapReady = true })
-      setTimeout(() => {
-        if (!window.__mapReady) {
-          mapError.value = '地图加载超时：请检查高德 Key / 安全密钥是否授权当前域名'
-        }
-      }, 3000)
-    }
-    if (!mapInfoWindow) {
-      mapInfoWindow = new amapApi.InfoWindow({ offset: new amapApi.Pixel(0, -32), isCustom: false })
-    }
-    // 重新生成时先清空旧 Marker / 旧轨迹，再绘制新内容
-    clearMapOverlays()
-
-    // ① 景点（橙色）：参与路线
-    const spotMarkers = spotPoints.map((point, index) => {
-      const marker = new amapApi.Marker({
-        position: [point.lng, point.lat],
-        content: buildMarkerHtml(point.badge, point.name, point.isStart),
-        offset: new amapApi.Pixel(0, 0),
-        zIndex: 120 + index,
-        title: (point.isStart ? '起点·' : `第${point.badge}站·`) + point.name,
-        bubble: true
-      })
-      // 悬浮气泡显示点位名称
-      marker.on('mouseover', () => {
-        if (!mapInstance || !mapInfoWindow) return
-        const label = point.isStart ? `起点 · ${point.name}` : `第${point.badge}站 · ${point.name}`
-        mapInfoWindow.setContent(
-          `<div style="padding:2px 6px;font-size:12px;line-height:18px;color:#303133;">${escapeMarkup(label)}</div>`
-        )
-        mapInfoWindow.open(mapInstance, [point.lng, point.lat])
-      })
-      marker.on('mouseout', () => {
-        if (mapInfoWindow) mapInfoWindow.close()
-      })
-      marker.setMap(mapInstance)
-      return marker
-    })
-
-    // ② 酒店（蓝色房子）：只打点，不进入 drawDrivingRoute 的坐标数组
-    const hotelMarkers = hotelPoints.map((hotel, index) => {
-      const marker = new amapApi.Marker({
-        position: [hotel.lng, hotel.lat],
-        content: buildHotelMarkerHtml(hotel.name),
-        offset: new amapApi.Pixel(0, 0),
-        zIndex: 200 + index,
-        title: `酒店·${hotel.name}`,
-        bubble: true
-      })
-      marker.on('click', () => openHotelInfoWindow(hotel))
-      marker.setMap(mapInstance)
-      return marker
-    })
-
-    mapOverlays = [...spotMarkers, ...hotelMarkers]
-    // 折线只串联景点（route_list 顺序）；酒店从不参与连线
-    const ok = spotPoints.length > 1 ? await drawDrivingRoute(spotPoints) : true
-    if (token !== mapRenderToken) return
-    // 高德返回的里程全部丢弃，只用它画轨迹
-    if (!ok) throw new Error('驾车路线请求失败')
-    mapInstance.setFitView(null, false, [60, 60, 80, 60])
-    // 布局是 flex + 滚动容器，初始化后补一次 resize，避免宽度按 0 计算导致空白
-    setTimeout(() => {
-      if (mapInstance && token === mapRenderToken) mapInstance.resize()
-    }, 60)
-    mapDirty = false
-  } catch (e) {
-    console.warn('[Plan] 高德地图渲染失败，已隐藏地图:', e?.message || e)
-    if (token === mapRenderToken) {
-      mapError.value = String(e?.message || e || '地图渲染失败')
-      destroyMap()
-      mapDirty = false
-    }
-  }
+  mapVisible.value = true
+  mapDirty = false
 }
 
 // 导出当前路线为 JSON 文件（纯前端下载，不新增/不调用任何接口）
