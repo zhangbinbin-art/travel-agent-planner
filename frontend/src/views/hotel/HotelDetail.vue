@@ -55,6 +55,11 @@
             />
           </div>
         </div>
+        <div class="booking-bar">
+          <el-button type="primary" size="large" class="booking-btn" @click="openBooking">
+            预定酒店
+          </el-button>
+        </div>
         <div class="info-row">
           <span class="label">配套设施</span>
           <span>
@@ -64,16 +69,42 @@
         </div>
       </div>
     </el-card>
+
+    <!-- 预定酒店弹窗：提交后创建订单并跳转支付页 -->
+    <el-dialog v-model="bookingVisible" title="预定酒店" width="440px">
+      <el-form label-width="90px">
+        <el-form-item label="入住日期">
+          <el-date-picker v-model="checkIn" type="date" value-format="YYYY-MM-DD" placeholder="选择入住日期" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="离店日期">
+          <el-date-picker v-model="checkOut" type="date" value-format="YYYY-MM-DD" placeholder="选择离店日期" style="width: 100%" />
+        </el-form-item>
+        <el-form-item label="入住人数">
+          <el-input-number v-model="guestCount" :min="1" :max="10" />
+        </el-form-item>
+        <el-form-item label="预计费用">
+          <span class="booking-estimate">¥{{ estimateTotal }}</span>
+          <span class="booking-note">（{{ nights }} 晚 × ¥{{ formatMoney(hotel?.price_per_day) }}）</span>
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="bookingVisible = false">取消</el-button>
+        <el-button type="primary" :loading="submitting" @click="submitBooking">确认预定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, computed, onMounted } from 'vue'
-import { useRoute } from 'vue-router'
-import { getOnShelfHotels } from '@/api/hotel'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { createHotelOrder, getOnShelfHotels } from '@/api/hotel'
 import { parseFacilities } from '@/utils/hotel'
+import { auth } from '@/utils/auth'
 
 const route = useRoute()
+const router = useRouter()
 const hotel = ref(null)
 const loading = ref(false)
 
@@ -114,6 +145,65 @@ const fetchHotel = async () => {
     console.warn('[HotelDetail] 获取酒店信息失败:', e?.message)
   } finally {
     loading.value = false
+  }
+}
+
+// ===== 预定酒店 =====
+const bookingVisible = ref(false)
+const submitting = ref(false)
+const checkIn = ref('')
+const checkOut = ref('')
+const guestCount = ref(1)
+
+const nights = computed(() => {
+  if (!checkIn.value || !checkOut.value) return 0
+  const a = new Date(checkIn.value).getTime()
+  const b = new Date(checkOut.value).getTime()
+  if (!Number.isFinite(a) || !Number.isFinite(b) || b <= a) return 0
+  return Math.round((b - a) / 86400000)
+})
+
+const estimateTotal = computed(() => {
+  const price = Number(hotel.value?.price_per_day || 0)
+  return (nights.value > 0 ? nights.value * price : price).toFixed(2)
+})
+
+const openBooking = () => {
+  if (!auth.token) {
+    ElMessage.warning('请先登录')
+    router.push({ path: '/login', query: { redirect: route.fullPath } })
+    return
+  }
+  bookingVisible.value = true
+}
+
+const submitBooking = async () => {
+  if (!hotel.value?.id) return
+  if (!checkIn.value || !checkOut.value) {
+    ElMessage.warning('请选择入住和离店日期')
+    return
+  }
+  if (nights.value <= 0) {
+    ElMessage.warning('离店日期必须晚于入住日期')
+    return
+  }
+  submitting.value = true
+  try {
+    const res = await createHotelOrder({
+      hotel_id: hotel.value.id,
+      check_in: checkIn.value,
+      check_out: checkOut.value,
+      people_count: guestCount.value
+    })
+    const orderId = res.data?.id
+    ElMessage.success('预定成功，请完成支付')
+    bookingVisible.value = false
+    if (orderId) router.push(`/pay/${orderId}`)
+  } catch (e) {
+    const detail = e?.response?.data?.detail || '预定失败，请稍后重试'
+    ElMessage.error(String(detail).replace('REAL_NAME_REQUIRED: ', ''))
+  } finally {
+    submitting.value = false
   }
 }
 
@@ -185,4 +275,26 @@ onMounted(fetchHotel)
 .facility-tag {
   margin: 0 6px 6px 0;
 }
+
+.booking-bar {
+  display: flex;
+  justify-content: flex-end;
+  padding: 4px 0 8px;
+}
+.booking-btn {
+  background: #ff7a45;
+  border-color: #ff7a45;
+  border-radius: 10px;
+}
+.booking-estimate {
+  color: #f56c6c;
+  font-weight: 600;
+  font-size: 16px;
+}
+.booking-note {
+  margin-left: 8px;
+  color: #9aa3b2;
+  font-size: 12px;
+}
+
 </style>

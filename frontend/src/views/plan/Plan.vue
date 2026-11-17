@@ -90,42 +90,6 @@
             </div>
           </div>
 
-          <div class="pref-field">
-            <div class="field-label">酒店筛选与选择</div>
-            <HotelPicker
-              v-model="selectedHotelId"
-              :city="targetCity.trim()"
-              :allow-custom="!hasGeneratedRoute"
-              :generated="hasGeneratedRoute"
-              :hotel-markers="routeData?.hotel_markers || []"
-              :reset-signal="hotelResetSignal"
-              :filter-seed="hotelFilterSeed"
-              @change="onHotelChange"
-              @filters-change="hotelFilters = $event"
-            />
-          </div>
-
-          <div class="booking-block">
-            <el-form label-width="86px" size="small">
-              <el-form-item label="入住日期">
-                <el-date-picker v-model="bookingStart" type="date" value-format="YYYY-MM-DD" placeholder="选择入住日期" style="width: 100%" />
-              </el-form-item>
-              <el-form-item label="离店日期">
-                <el-date-picker v-model="bookingEnd" type="date" value-format="YYYY-MM-DD" placeholder="选择离店日期" style="width: 100%" />
-              </el-form-item>
-              <el-form-item label="入住人数">
-                <el-input-number v-model="guestCount" :min="1" :max="10" />
-              </el-form-item>
-              <el-form-item label="备注">
-                <el-input v-model="remark" maxlength="200" placeholder="选填，如房型偏好" />
-              </el-form-item>
-              <el-form-item>
-                <el-button type="warning" :disabled="!selectedHotelId" :loading="bookingSubmitting" @click="submitBooking">
-                  提交酒店预约
-                </el-button>
-              </el-form-item>
-            </el-form>
-          </div>
         </div>
       </div>
 
